@@ -1,0 +1,24 @@
+10/29/2015
+----------
+
+This git repository combines several git repositories so that we can
+have a complete history of stable bits. It can be used for tracking
+down regressions and releasing stable slash2 bits to the general public.
+
+So why not using the same set of tags on different git repositories?
+Only a combined git repositories allows using binary search to pin
+point a commit that causes/triggers a bug unless you want to tag
+every commit in each git repository.
+
+Furthermore, if you use the same git tree for development and release
+engineering, you still have to merge your changes with the HEAD of the
+git repository after you stabilize the tree. This is hard if the HEAD 
+constantly changes.  In addition, commits are written by permanent markers
+while tags can be deleted anytime.
+
+Of course, if the development tree is always stable, then we don't need
+to maintain a stable tree at all.
+
+Stabilizing a moving target is not easy. Alternatively, we could freeze
+the git trees and only bug fixes are allowed.  Using a separate tree
+also allows us to cherry-picking changes from the development trees.
