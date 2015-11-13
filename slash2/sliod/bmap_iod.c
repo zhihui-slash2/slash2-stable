@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2009-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include <sys/time.h>
@@ -242,6 +240,8 @@ slibmaprlsthr_main(struct psc_thread *thr)
 					break;
 			}
 			if (!pll_nitems(&bii->bii_rls)) {
+				b->bcm_flags |= BMAPF_RELEASING;
+				/* XXX locking violation */
 				lc_remove(&sli_bmap_releaseq, bii);
 				psc_dynarray_add(&a, b);
 			}
@@ -334,7 +334,6 @@ iod_bmap_finalcleanup(struct bmap *b)
 
 	bii = bmap_2_bii(b);
 
-	/* XXX Hit this assert within 1 hour of my four ways parallel tests */
 	psc_assert(pll_empty(&bii->bii_rls));
 	psc_assert(SPLAY_EMPTY(&bii->bii_slvrs));
 	psc_assert(psclist_disjoint(&bii->bii_lentry));
@@ -346,13 +345,12 @@ iod_bmap_finalcleanup(struct bmap *b)
  * the CRC states bitmap.  For now we only load this information on read.
  *
  * @b: bmap to load.
- * @rw: the bmap access mode.
  *
  * Return zero on success or errno code on failure (likely an RPC
  * problem).
  */
 int
-iod_bmap_retrieve(struct bmap *b, enum rw rw, __unusedx int flags)
+iod_bmap_retrieve(struct bmap *b, __unusedx int flags)
 {
 	struct pscrpc_request *rq = NULL;
 	struct srm_getbmap_full_req *mq;
@@ -372,7 +370,7 @@ iod_bmap_retrieve(struct bmap *b, enum rw rw, __unusedx int flags)
 		goto out;
 	}
 
-	mq->rw = rw;
+	mq->rw = b->bcm_flags & BMAPF_RD ? SL_READ : SL_WRITE;
 	mq->bmapno = b->bcm_bmapno;
 	memcpy(&mq->fg, &b->bcm_fcmh->fcmh_fg, sizeof(mq->fg));
 

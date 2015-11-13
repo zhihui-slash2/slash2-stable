@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2007-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include <sys/types.h>
@@ -107,7 +105,7 @@ _mds_fcmh_setattr(int vfsid, struct fidc_membh *f, int to_set,
 }
 
 int
-slm_fcmh_ctor(struct fidc_membh *f, int flags)
+slm_fcmh_ctor(struct fidc_membh *f, __unusedx int flags)
 {
 	struct fcmh_mds_info *fmi;
 	struct mio_fh *ino_mfh;
@@ -130,8 +128,7 @@ slm_fcmh_ctor(struct fidc_membh *f, int flags)
 	    &f->fcmh_sstb, &fcmh_2_mfid(f));
 	if (rc) {
 		fmi->fmi_ctor_rc = rc;
-		DEBUG_FCMH(flags & FIDC_LOOKUP_NOLOG ? PLL_DIAG :
-		    PLL_WARN, f, "mdsio_lookup_slfid failed; "
+		DEBUG_FCMH(PLL_WARN, f, "mdsio_lookup_slfid failed; "
 		    "fid="SLPRI_FID" rc=%d",
 		    fcmh_2_fid(f), rc);
 		return (rc);
@@ -190,10 +187,8 @@ slm_fcmh_ctor(struct fidc_membh *f, int flags)
 			    fcmh_2_dino_mfh(f));
 		} else if (rc) {
 			fmi->fmi_ctor_rc = rc;
-			if ((flags & FIDC_LOOKUP_NOLOG) == 0)
-				DEBUG_FCMH(PLL_WARN, f,
-				    "mdsio_lookup failed; rc=%d",
-				    rc);
+			DEBUG_FCMH(PLL_WARN, f,
+			    "mdsio_lookup failed; rc=%d", rc);
 			return (rc);
 		}
 

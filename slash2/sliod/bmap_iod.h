@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2006-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #ifndef _SLIOD_BMAP_H_
@@ -99,11 +97,12 @@ struct bmap_iod_info {
 
 	struct biod_slvrtree	 bii_slvrs;
 	struct psc_listentry	 bii_lentry;
-	struct psc_lockedlist	 bii_rls;
+	struct psc_lockedlist	 bii_rls;	/* leases */
 };
 
 /* sliod-specific bcm_flags */
 #define BMAPF_CRUD_INFLIGHT	(_BMAPF_SHIFT << 0)	/* CRC update RPC inflight */
+#define BMAPF_RELEASING		(_BMAPF_SHIFT << 1)	/* marked for release by reaper */
 
 #define bii_2_flags(b)		bii_2_bmap(b)->bcm_flags
 

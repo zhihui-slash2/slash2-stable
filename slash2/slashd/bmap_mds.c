@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2006-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #define PSC_SUBSYS SLSS_BMAP
@@ -53,9 +51,6 @@ bmap_2_mfh(struct bmap *b)
 /*
  * Called when a read request offset exceeds the bounds of the file
  * causing a new bmap to be created.
- *
- * Note: bmap creation race conditions are prevented because the bmap
- * handle already exists at this time with bcm_flags == BMAPF_INIT.
  *
  * This causes other threads to block on the waitq until read/creation
  * has completed.
@@ -170,7 +165,7 @@ slm_bmap_resetnonce(struct bmap *b)
  * Returns zero on success, negative errno code on failure.
  */
 int
-mds_bmap_read(struct bmap *b, __unusedx enum rw rw, int flags)
+mds_bmap_read(struct bmap *b, int flags)
 {
 	int rc, vfsid, retifset[NBREPLST];
 	struct bmap_mds_info *bmi = bmap_2_bmi(b);

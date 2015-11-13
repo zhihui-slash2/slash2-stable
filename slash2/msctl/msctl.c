@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2007-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include <sys/types.h>
@@ -812,7 +810,7 @@ void
 ms_biorq_prhdr(__unusedx struct psc_ctlmsghdr *mh, __unusedx const void *m)
 {
 	printf("%-16s %5s %3s %9s %6s "
-	    "%10s %3s %10s %10s %2s %2s %4s\n",
+	    "%11s %3s %10s %10s %2s %2s %4s\n",
 	    "fid", "bno", "ref", "off", "len",
 	    "flags", "try", "sliod", "expire", "np", "nr", "addr");
 }
@@ -822,8 +820,8 @@ ms_biorq_prdat(__unusedx const struct psc_ctlmsghdr *mh, const void *m)
 {
 	const struct msctlmsg_biorq *msr = m;
 
-	printf("%016"SLPRIxFID" %5d %3d %9d %6d     "
-	    "%c%c%c%c%c%c%c%c%c%c "
+	printf("%016"SLPRIxFID" %5d %3d %9d %6d "
+	    "%c%c%c%c%c%c%c%c%c%c%c "
 	    "%3d %10s %10"PRId64" %2d %2d %#lx\n",
 	    msr->msr_fid, msr->msr_bno, msr->msr_ref, msr->msr_off,
 	    msr->msr_len,
@@ -837,6 +835,7 @@ ms_biorq_prdat(__unusedx const struct psc_ctlmsghdr *mh, const void *m)
 	    msr->msr_flags & BIORQ_WAIT			? 'W' : '-',
 	    msr->msr_flags & BIORQ_ONTREE		? 't' : '-',
 	    msr->msr_flags & BIORQ_READAHEAD		? 'a' : '-',
+	    msr->msr_flags & BIORQ_AIOWAKE		? 'k' : '-',
 	    msr->msr_retries, msr->msr_last_sliod,
 	    msr->msr_expire.tv_sec, msr->msr_npages,
 	    msr->msr_nrq, msr->msr_addr);

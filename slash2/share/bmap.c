@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2008-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -121,7 +119,8 @@ _bmap_op_done(const struct pfl_callerinfo *pci, struct bmap *b,
  * it was newly created or not.
  */
 struct bmap *
-bmap_lookup_cache(struct fidc_membh *f, sl_bmapno_t n, int *new_bmap)
+bmap_lookup_cache(struct fidc_membh *f, sl_bmapno_t n, int bmaprw,
+    int *new_bmap)
 {
 	struct bmap lb, *b, *bnew = NULL;
 	int doalloc;
@@ -190,7 +189,8 @@ bmap_lookup_cache(struct fidc_membh *f, sl_bmapno_t n, int *new_bmap)
 	 * Signify that the bmap is newly initialized and therefore may
 	 * not contain certain structures.
 	 */
-	b->bcm_flags = BMAPF_INIT;
+	psc_assert(bmaprw == BMAPF_RD || bmaprw == BMAPF_WR);
+	b->bcm_flags = bmaprw;
 
 	bmap_op_start_type(b, BMAP_OPCNT_LOOKUP);
 
@@ -209,8 +209,8 @@ bmap_lookup_cache(struct fidc_membh *f, sl_bmapno_t n, int *new_bmap)
 	return (b);
 }
 
-/**
- * _bmap_get - Get the specified bmap.
+/*
+ * Get the specified bmap.
  * @f: fcmh.
  * @n: bmap number.
  * @rw: access mode.
@@ -232,65 +232,71 @@ _bmap_get(const struct pfl_callerinfo *pci, struct fidc_membh *f,
 		bmaprw = rw == SL_WRITE ? BMAPF_WR : BMAPF_RD;
 
 	new_bmap = flags & BMAPGETF_CREATE;
-	b = bmap_lookup_cache(f, n, &new_bmap);
+	b = bmap_lookup_cache(f, n, bmaprw, &new_bmap);
 	if (b == NULL) {
 		rc = ENOENT;
 		goto out;
 	}
 
-	if (new_bmap)
-		b->bcm_flags |= bmaprw;
-
-	if (b->bcm_flags & (BMAPF_RETR | BMAPF_MODECHNG)) {
-		if (flags & BMAPGETF_NONBLOCK)
+	if (flags & BMAPGETF_NONBLOCK) {
+		if (b->bcm_flags & BMAPF_LOADING)
 			goto out;
-		/*
-		 * Wait while retrieving or mode-changing.
-		 *
-		 * Others wishing to access this bmap in the same mode
-		 * must wait until MODECHNG ops have completed.  If the
-		 * desired mode is present then a thread may proceed
-		 * without blocking here so long as it only accesses
-		 * structures which pertain to its mode.
-		 */
-		bmap_wait_locked(b, b->bcm_flags &
-		    (BMAPF_RETR | BMAPF_MODECHNG));
+	} else
+		bmap_wait_locked(b, b->bcm_flags & BMAPF_LOADING);
+
+	if (b->bcm_flags & BMAPF_LOADED)
+		goto loaded;
+
+	if (flags & BMAPGETF_NORETRIEVE) {
+		b->bcm_flags |= BMAPF_LOADED;
+		goto loaded;
 	}
 
-	if (b->bcm_flags & BMAPF_INIT) {
-		if (flags & BMAPGETF_NORETRIEVE)
-			b->bcm_flags &= ~BMAPF_INIT;
-		else {
-			b->bcm_flags |= BMAPF_RETR;
-			BMAP_ULOCK(b);
-			/*
-			 * mds_bmap_read(),
-			 * iod_bmap_retrieve(),
-			 * msl_bmap_retrieve()
-			 */
-			psc_assert(rw == SL_WRITE || rw == SL_READ);
-			rc = sl_bmap_ops.bmo_retrievef(b, rw, flags);
-			BMAP_LOCK(b);
-			b->bcm_flags &= ~BMAPF_RETR;
+	b->bcm_flags |= BMAPF_LOADING;
+	DEBUG_BMAP(PLL_DIAG, b, "loading bmap; flags=%d", flags);
+	BMAP_ULOCK(b);
 
-			if (flags & BMAPGETF_NONBLOCK || rc)
-				;
-			else
-				b->bcm_flags &= ~BMAPF_INIT;
-		}
-		if ((b->bcm_flags & BMAPF_INIT) == 0)
-			bmap_wake_locked(b);
+	/* mds_bmap_read(), iod_bmap_retrieve(), msl_bmap_retrieve() */
+	rc = sl_bmap_ops.bmo_retrievef(b, flags);
+
+	BMAP_LOCK(b);
+
+	if (flags & BMAPGETF_NONBLOCK) {
+		if (rc)
+			b->bcm_flags &= ~BMAPF_LOADING;
+		goto out;
 	}
+	b->bcm_flags &= ~BMAPF_LOADING;
+	if (!rc) {
+		b->bcm_flags |= BMAPF_LOADED;
+		bmap_wake_locked(b);
+	}
+
+ loaded:
+	/*
+	 * Others wishing to access this bmap in the same mode must wait
+	 * until MODECHNG ops have completed.  If the desired mode is
+	 * present then a thread may proceed without blocking here so
+	 * long as it only accesses structures which pertain to its
+	 * mode.
+	 */
+	if (flags & BMAPGETF_NONBLOCK) {
+		if (b->bcm_flags & BMAPF_MODECHNG)
+			goto out;
+	} else
+		bmap_wait_locked(b, b->bcm_flags & BMAPF_MODECHNG);
 
 	/*
 	 * Not all lookups are done with the intent of changing the bmap
-	 * mode.  bmap_lookup() does not specify a rw value.
+	 * mode i.e. bmap_lookup() does not specify a rw value.
 	 *
 	 * bmo_mode_chngf is currently CLI only and is
 	 * msl_bmap_modeset().
 	 */
-	if (!(bmaprw & b->bcm_flags) && sl_bmap_ops.bmo_mode_chngf) {
+	if (bmaprw && !(bmaprw & b->bcm_flags) &&
+	    sl_bmap_ops.bmo_mode_chngf) {
 
+		psc_assert(!(b->bcm_flags & BMAPF_MODECHNG));
 		b->bcm_flags |= BMAPF_MODECHNG;
 
 		DEBUG_BMAP(PLL_DIAG, b, "about to mode change (rw=%d)",
@@ -302,11 +308,9 @@ _bmap_get(const struct pfl_callerinfo *pci, struct fidc_membh *f,
 		rc = sl_bmap_ops.bmo_mode_chngf(b, rw, flags);
 
 		BMAP_LOCK(b);
-		b->bcm_flags &= ~BMAPF_MODECHNG;
-		if (flags & BMAPGETF_NONBLOCK || rc)
-			;
-		else
-			b->bcm_flags |= bmaprw;
+
+		if ((flags & BMAPGETF_NONBLOCK) == 0 || rc)
+			b->bcm_flags &= ~BMAPF_MODECHNG;
 		bmap_wake_locked(b);
 	}
 
@@ -364,24 +368,13 @@ _dump_bmap_flags_common(uint32_t *flags, int *seq)
 {
 	PFL_PRFLAG(BMAPF_RD, flags, seq);
 	PFL_PRFLAG(BMAPF_WR, flags, seq);
-	PFL_PRFLAG(BMAPF_INIT, flags, seq);
+	PFL_PRFLAG(BMAPF_LOADED, flags, seq);
+	PFL_PRFLAG(BMAPF_LOADING, flags, seq);
 	PFL_PRFLAG(BMAPF_DIO, flags, seq);
-	PFL_PRFLAG(BMAPF_DIOCB, flags, seq);
 	PFL_PRFLAG(BMAPF_TOFREE, flags, seq);
 	PFL_PRFLAG(BMAPF_MODECHNG, flags, seq);
 	PFL_PRFLAG(BMAPF_WAITERS, flags, seq);
 	PFL_PRFLAG(BMAPF_BUSY, flags, seq);
-}
-
-__weak void
-dump_bmap_flags(uint32_t flags)
-{
-	int seq = 0;
-
-	_dump_bmap_flags_common(&flags, &seq);
-	if (flags)
-		printf(" unknown: %#x", flags);
-	printf("\n");
 }
 
 void

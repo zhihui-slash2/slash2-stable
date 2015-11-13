@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2007-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -211,7 +209,7 @@ msrcm_handle_bmap_wake(struct pscrpc_request *rq)
 	struct fidc_membh *c = NULL;
 
 	SL_RSX_ALLOCREP(rq, mq, mp);
-	mp->rc = fidc_lookup_load(mq->fg.fg_fid, &c, NULL);
+	mp->rc = sl_fcmh_peek_fid(mq->fg.fg_fid, &c);
 	if (mp->rc)
 		goto out;
 	if (c->fcmh_flags & FCMH_CLI_TRUNC) {
@@ -242,15 +240,10 @@ msrcm_handle_bmapdio(struct pscrpc_request *rq)
 
 	SL_RSX_ALLOCREP(rq, mq, mp);
 
-	OPSTAT_INCR("bmap-dio");
-	psclog_info("fid="SLPRI_FID" bmapno=%u seq=%"PRId64,
+	psclog_diag("fid="SLPRI_FID" bmapno=%u seq=%"PRId64,
 	    mq->fid, mq->bno, mq->seq);
 
-	/*
-	 * XXX it is possible this fcmh won't be in the cache -- force a
-	 * load?
-	 */
-	mp->rc = fidc_lookup_fid(mq->fid, &f);
+	mp->rc = sl_fcmh_peek_fid(mq->fid, &f);
 	if (mp->rc)
 		PFL_GOTOERR(out, mp->rc);
 

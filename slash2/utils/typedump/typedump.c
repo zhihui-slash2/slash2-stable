@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2009-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include <sys/param.h>
@@ -169,6 +167,7 @@ main(int argc, char *argv[])
 	PRTYPE(struct bmpc_write_coalescer);
 	PRTYPE(struct bw_dir);
 	PRTYPE(struct dircache_ent);
+	PRTYPE(struct dircache_ent_update);
 	PRTYPE(struct dircache_ent_query);
 	PRTYPE(struct dircache_expire);
 	PRTYPE(struct dircache_page);
@@ -390,6 +389,7 @@ main(int argc, char *argv[])
 	PRVAL(BIAF_DIO);
 	PRVAL(BIM_MINAGE);
 	PRVAL(BIM_RETRIEVE_SEQ);
+	PRVAL(BIORQ_AIOWAKE);
 	PRVAL(BIORQ_DESTROY);
 	PRVAL(BIORQ_DIO);
 	PRVAL(BIORQ_EXPIRE);
@@ -408,8 +408,8 @@ main(int argc, char *argv[])
 	PRVAL(BMAPFLSH_TRUNCATE);
 	PRVAL(BMAPF_BUSY);
 	PRVAL(BMAPF_DIO);
-	PRVAL(BMAPF_DIOCB);
-	PRVAL(BMAPF_INIT);
+	PRVAL(BMAPF_LOADED);
+	PRVAL(BMAPF_LOADING);
 	PRVAL(BMAPF_MODECHNG);
 	PRVAL(BMAPF_RD);
 	PRVAL(BMAPF_TOFREE);
@@ -483,6 +483,7 @@ main(int argc, char *argv[])
 	PRVAL(CSVCF_WANTFREE);
 	PRVAL(CSVC_PING_INTV);
 	PRVAL(CSVC_RECONNECT_INTV);
+	PRVAL(DCEF_HOLD);
 	PRVAL(DIRCACHEPGF_EOF);
 	PRVAL(DIRCACHEPGF_FREEING);
 	PRVAL(DIRCACHEPGF_LOADING);
@@ -518,8 +519,7 @@ main(int argc, char *argv[])
 	PRVAL(FIDC_LOOKUP_CREATE);
 	PRVAL(FIDC_LOOKUP_EXCL);
 	PRVAL(FIDC_LOOKUP_LOAD);
-	PRVAL(FIDC_LOOKUP_NOLOG);
-	PRVAL(FIDC_LOOKUP_NONE);
+	PRVAL(FIDC_LOOKUP_LOCK);
 	PRVAL(FID_PATH_DEPTH);
 	PRVAL(FID_PATH_START);
 	PRVAL(FSID_LEN);
@@ -584,6 +584,7 @@ main(int argc, char *argv[])
 	PRVAL(REPL_WALKF_SCIRCUIT);
 	PRVAL(RESF_DISABLE_BIA);
 	PRVAL(RESF_PREFIOS);
+	PRVAL(RESM_MAX_OUTSTANDING_RPCS);
 	PRVAL(RIC_MAX_SLVRS_PER_IO);
 	PRVAL(RPCIF_AVOID);
 	PRVAL(RPCIF_STATFS_FETCHING);
@@ -788,10 +789,6 @@ main(int argc, char *argv[])
 	PRVAL(MSTHRT_READAHEAD);
 	PRVAL(MSTHRT_USKLNDPL);
 	PRVAL(MSTHRT_WORKER);
-	PRVAL(NAMECACHELOOKUPF_DELETE);
-	PRVAL(NAMECACHELOOKUPF_INSERT);
-	PRVAL(NAMECACHELOOKUPF_PEEK);
-	PRVAL(NAMECACHELOOKUPF_UPDATE);
 	PRVAL(NS_DIR_RECV);
 	PRVAL(NS_DIR_SEND);
 	PRVAL(NS_NDIRS);

@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2007-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -50,7 +48,7 @@
 struct psc_poolmaster	  fidcPoolMaster;
 struct psc_poolmgr	 *fidcPool;
 struct psc_listcache	  fidcIdleList;		/* identity untouched, but reapable */
-struct psc_hashtbl	  fidcHtable;
+struct psc_hashtbl	  sl_fcmh_hashtbl;
 
 #define fcmh_get()	psc_pool_get(fidcPool)
 #define fcmh_put(f)	psc_pool_return(fidcPool, (f))
@@ -70,7 +68,7 @@ fcmh_destroy(struct fidc_membh *f)
 {
 	psc_assert(RB_EMPTY(&f->fcmh_bmaptree));
 	psc_assert(f->fcmh_refcnt == 0);
-	psc_assert(psc_hashent_disjoint(&fidcHtable, f));
+	psc_assert(psc_hashent_disjoint(&sl_fcmh_hashtbl, f));
 	psc_assert(!psc_waitq_nwaiters(&f->fcmh_waitq));
 
 	psc_waitq_destroy(&f->fcmh_waitq);
@@ -140,7 +138,7 @@ fidc_reap(int max, int only_expired)
 	psclog_debug("reaping %d files from fidcache", nreap);
 
 	for (i = 0; i < nreap; i++) {
-		psc_hashent_remove(&fidcHtable, reap[i]);
+		psc_hashent_remove(&sl_fcmh_hashtbl, reap[i]);
 		fcmh_destroy(reap[i]);
 	}
 	return (i);
@@ -159,7 +157,8 @@ fidc_reaper(struct psc_poolmgr *m)
  * Search the FID cache for a member by its FID, optionally creating it.
  *
  * @pci: thread caller information.
- * @fgp: FID and GEN #.
+ * @fid: FID.
+ * @fgen: file GEN #.
  * @flags: access flags.
  * @fp: value-result fcmh return.
  * @arg: argument to GETATTR.
@@ -170,16 +169,15 @@ fidc_reaper(struct psc_poolmgr *m)
  * Note: Returns positive errno.
  */
 int
-_fidc_lookup(const struct pfl_callerinfo *pci,
-    const struct sl_fidgen *fgp, int flags, struct fidc_membh **fp,
-    void *arg)
+_fidc_lookup(const struct pfl_callerinfo *pci, slfid_t fid,
+    slfgen_t fgen, int flags, struct fidc_membh **fp, void *arg)
 {
 	struct fidc_membh *tmp, *f, *fnew;
 	struct psc_hashbkt *b;
 	int rc = 0, try_create = 0;
 
-	psclog_debug("fidc_lookup called for fid "SLPRI_FID,
-	    fgp->fg_fid);
+	psclog_debug("fidc_lookup called for fid "SLPRI_FID" "
+	    "gen "SLPRI_FGEN, fid, fgen);
 
 	*fp = NULL;
 	fnew = NULL; /* gcc */
@@ -190,15 +188,15 @@ _fidc_lookup(const struct pfl_callerinfo *pci,
 #endif
 
 	/* OK.  Now check if it is already in the cache. */
-	b = psc_hashbkt_get(&fidcHtable, &fgp->fg_fid);
+	b = psc_hashbkt_get(&sl_fcmh_hashtbl, &fid);
  restart:
 	f = NULL;
-	PSC_HASHBKT_FOREACH_ENTRY(&fidcHtable, tmp, b) {
+	PSC_HASHBKT_FOREACH_ENTRY(&sl_fcmh_hashtbl, tmp, b) {
 		/*
 		 * Note that generation number is only used to track
-		 *   truncations.
+		 * truncations.
 		 */
-		if (fgp->fg_fid != fcmh_2_fid(tmp))
+		if (fid != fcmh_2_fid(tmp))
 			continue;
 		FCMH_LOCK(tmp);
 
@@ -244,20 +242,21 @@ _fidc_lookup(const struct pfl_callerinfo *pci,
 			fnew = NULL;
 		}
 
-		psc_assert(fgp->fg_fid == fcmh_2_fid(f));
+		psc_assert(fid == fcmh_2_fid(f));
 
 		/* keep me around after unlocking later */
 		fcmh_op_start_type(f, FCMH_OPCNT_LOOKUP_FIDC);
 
-		psc_hashbkt_put(&fidcHtable, b);
+		psc_hashbkt_put(&sl_fcmh_hashtbl, b);
 
 		/* call sli_fcmh_reopen() sliod only */
 		if (sl_fcmh_ops.sfop_modify)
-			rc = sl_fcmh_ops.sfop_modify(f, fgp);
+			rc = sl_fcmh_ops.sfop_modify(f, fgen);
 		if (rc)
 			fcmh_op_done_type(f, FCMH_OPCNT_LOOKUP_FIDC);
 		else {
-			FCMH_ULOCK(f);
+			if ((flags & FIDC_LOOKUP_LOCK) == 0)
+				FCMH_ULOCK(f);
 			*fp = f;
 		}
 		return (rc);
@@ -280,7 +279,7 @@ _fidc_lookup(const struct pfl_callerinfo *pci,
 		 * FIDC_LOOKUP_CREATE was not specified and the fcmh is
 		 * not present.
 		 */
-		psc_hashbkt_put(&fidcHtable, b);
+		psc_hashbkt_put(&sl_fcmh_hashtbl, b);
 		return (ENOENT);
 	}
 
@@ -294,11 +293,12 @@ _fidc_lookup(const struct pfl_callerinfo *pci,
 	INIT_PSC_LISTENTRY(&f->fcmh_lentry);
 	RB_INIT(&f->fcmh_bmaptree);
 	INIT_SPINLOCK(&f->fcmh_lock);
-	psc_hashent_init(&fidcHtable, f);
+	psc_hashent_init(&sl_fcmh_hashtbl, f);
 	psc_waitq_init(&f->fcmh_waitq);
 	pfl_rwlock_init(&f->fcmh_rwlock);
 
-	COPYFG(&f->fcmh_fg, fgp);
+	f->fcmh_fg.fg_fid = fid;
+	f->fcmh_fg.fg_gen = fgen;
 	fcmh_op_start_type(f, FCMH_OPCNT_NEW);
 
 	DEBUG_FCMH(PLL_DEBUG, f, "new");
@@ -310,8 +310,8 @@ _fidc_lookup(const struct pfl_callerinfo *pci,
 	 * item is not on any list yet.
 	 */
 	f->fcmh_flags |= FCMH_INITING;
-	psc_hashbkt_add_item(&fidcHtable, b, f);
-	psc_hashbkt_put(&fidcHtable, b);
+	psc_hashbkt_add_item(&sl_fcmh_hashtbl, b, f);
+	psc_hashbkt_put(&sl_fcmh_hashtbl, b);
 
 	/*
 	 * Call service specific constructor slm_fcmh_ctor(),
@@ -345,7 +345,8 @@ _fidc_lookup(const struct pfl_callerinfo *pci,
 		*fp = f;
 		fcmh_op_start_type(f, FCMH_OPCNT_LOOKUP_FIDC);
 	}
-	fcmh_op_done_type(f, FCMH_OPCNT_NEW);
+	_fcmh_op_done_type(PFL_CALLERINFOSS(SLSS_FCMH), f,
+	    FCMH_OPCNT_NEW, flags & FIDC_LOOKUP_LOCK);
 	return (rc);
 }
 
@@ -369,8 +370,8 @@ fidc_init(int privsiz)
 	lc_reginit(&fidcIdleList, struct fidc_membh, fcmh_lentry,
 	    "fcmhidle");
 
-	psc_hashtbl_init(&fidcHtable, 0, struct fidc_membh, fcmh_fg,
-	    fcmh_hentry, 3 * nobj - 1, NULL, "fidc");
+	psc_hashtbl_init(&sl_fcmh_hashtbl, 0, struct fidc_membh,
+	    fcmh_fg, fcmh_hentry, 3 * nobj - 1, NULL, "fidc");
 }
 
 ssize_t
@@ -419,7 +420,7 @@ _fcmh_op_start_type(const struct pfl_callerinfo *pci,
 
 void
 _fcmh_op_done_type(const struct pfl_callerinfo *pci,
-    struct fidc_membh *f, int type)
+    struct fidc_membh *f, int type, int keep_locked)
 {
 	int rc;
 
@@ -456,7 +457,7 @@ _fcmh_op_done_type(const struct pfl_callerinfo *pci,
 			f->fcmh_flags |= FCMH_TOFREE;
 			FCMH_ULOCK(f);
 
-			psc_hashent_remove(&fidcHtable, f);
+			psc_hashent_remove(&sl_fcmh_hashtbl, f);
 			fcmh_destroy(f);
 			return;
 		}
@@ -468,7 +469,8 @@ _fcmh_op_done_type(const struct pfl_callerinfo *pci,
 		f->fcmh_etime.tv_sec += MAX_FCMH_LIFETIME;
 	}
 	fcmh_wake_locked(f);
-	FCMH_ULOCK(f);
+	if (!keep_locked)
+		FCMH_ULOCK(f);
 }
 
 void
@@ -504,9 +506,9 @@ dump_fidcache(void)
 	struct psc_hashbkt *bkt;
 	struct fidc_membh *tmp;
 
-	PSC_HASHTBL_FOREACH_BUCKET(bkt, &fidcHtable) {
+	PSC_HASHTBL_FOREACH_BUCKET(bkt, &sl_fcmh_hashtbl) {
 		psc_hashbkt_lock(bkt);
-		PSC_HASHBKT_FOREACH_ENTRY(&fidcHtable, tmp, bkt)
+		PSC_HASHBKT_FOREACH_ENTRY(&sl_fcmh_hashtbl, tmp, bkt)
 			dump_fcmh(tmp);
 		psc_hashbkt_unlock(bkt);
 	}

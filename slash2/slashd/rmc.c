@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2007-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -347,9 +345,9 @@ slm_rmc_handle_getbmap(struct pscrpc_request *rq)
 	SL_RSX_ALLOCREP(rq, mq, mp);
 
 	if (mq->rw == SL_WRITE)
-		OPSTAT_INCR("get_bmap_lease_write");
+		OPSTAT_INCR("getbmap-lease-write");
 	else if (mq->rw == SL_READ)
-		OPSTAT_INCR("get_bmap_lease_read");
+		OPSTAT_INCR("getbmap-lease-read");
 	else {
 		mp->rc = -EINVAL;
 		return (0);
@@ -1462,8 +1460,10 @@ slm_rmc_handle_unlink(struct pscrpc_request *rq, int isfile)
 		struct fidc_membh *c;
 
 		if (slm_fcmh_get(&chfg, &c) == 0) {
-			mp->valid = 1;
-			mdsio_fcmh_refreshattr(c, &mp->cattr);
+			if (c->fcmh_sstb.sst_nlink) {
+				mp->valid = 1;
+				mdsio_fcmh_refreshattr(c, &mp->cattr);
+			}
 			fcmh_op_done(c);
 		}
 	}
@@ -1692,7 +1692,7 @@ slm_rmc_handle_getreplst(struct pscrpc_request *rq)
 	return (0);
 }
 
-/* 
+/*
  * Handle a RPC request, called from pscrpc_server_handle_request().
  */
 int

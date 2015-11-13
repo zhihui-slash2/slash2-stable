@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2008-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -66,7 +64,6 @@ struct psc_listcache		 slc_bmaptimeoutq;
 
 int				 slc_max_nretries = 256;
 
-#define MAX_OUTSTANDING_RPCS	1024
 #define MIN_COALESCE_RPC_SZ	LNET_MTU
 
 struct psc_waitq		 slc_bflush_waitq = PSC_WAITQ_INIT;
@@ -137,7 +134,7 @@ bmap_free_all_locked(struct fidc_membh *f)
  *	- user process/environment/file descriptor policy
  *	- user process interrupt
  *
- * XXX this should likely be merged with slc_rmc_retry_pfcc().
+ * XXX this should likely be merged with slc_rmc_retry_pfr().
  * XXX mfh_retries access and modification is racy here, e.g. if the
  *	process has multiple threads or forks.
  */
@@ -464,7 +461,7 @@ bmap_flush_send_rpcs(struct bmpc_write_coalescer *bwc)
 
 	r = psc_dynarray_getpos(&bwc->bwc_biorqs, 0);
 
-	rc = msl_bmap_to_csvc(r->biorq_bmap, 1, &csvc);
+	rc = msl_bmap_to_csvc(r->biorq_bmap, 1, NULL, &csvc);
 	if (rc)
 		PFL_GOTOERR(out, rc);
 
@@ -759,8 +756,8 @@ bmap_flush_trycoalesce(const struct psc_dynarray *biorqs, int *indexp)
 	return (bwc);
 }
 
-__static void
-bmap_flush_outstanding_rpcwait(struct sl_resm *m)
+int
+_msl_resm_throttle(struct sl_resm *m, int wait)
 {
 	struct timespec ts0, ts1, tsd;
 	struct resm_cli_info *rmci;
@@ -771,10 +768,18 @@ bmap_flush_outstanding_rpcwait(struct sl_resm *m)
 	 * XXX use resm multiwait?
 	 */
 	spinlock(&slc_bflush_lock);
-	PFL_GETTIMESPEC(&ts0);
+	if (!wait && atomic_read(&rmci->rmci_infl_rpcs) >=
+	    RESM_MAX_OUTSTANDING_RPCS) {
+		freelock(&slc_bflush_lock);
+		return (-EAGAIN);
+	}
+
 	while (atomic_read(&rmci->rmci_infl_rpcs) >=
-	    MAX_OUTSTANDING_RPCS) {
-		account = 1;
+	    RESM_MAX_OUTSTANDING_RPCS) {
+		if (!account) {
+			PFL_GETTIMESPEC(&ts0);
+			account = 1;
+		}
 		slc_bflush_tmout_flags |= BMAPFLSH_RPCWAIT;
 		psc_waitq_waitrel_ts(&slc_bflush_waitq,
 		    &slc_bflush_lock, &bmapFlushWaitSecs);
@@ -788,6 +793,7 @@ bmap_flush_outstanding_rpcwait(struct sl_resm *m)
 	}
 	slc_bflush_tmout_flags &= ~BMAPFLSH_RPCWAIT;
 	freelock(&slc_bflush_lock);
+	return (0);
 }
 
 /*
@@ -891,7 +897,7 @@ bmap_flush(void)
 		}
 		BMAP_ULOCK(b);
 
-		if (psc_dynarray_len(&bmaps) >= MAX_OUTSTANDING_RPCS)
+		if (psc_dynarray_len(&bmaps) >= RESM_MAX_OUTSTANDING_RPCS)
 			break;
 	}
 	LIST_CACHE_ULOCK(&slc_bmapflushq);
@@ -926,7 +932,7 @@ bmap_flush(void)
 		    (bwc = bmap_flush_trycoalesce(&reqs, &j))) {
 			didwork = 1;
 			bmap_flush_coalesce_map(bwc);
-			bmap_flush_outstanding_rpcwait(m);
+			msl_resm_throttle_wait(m);
 			bmap_flush_send_rpcs(bwc);
 		}
 		psc_dynarray_reset(&reqs);

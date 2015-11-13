@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2006-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #ifndef _SLASHD_BMAP_MDS_H_
@@ -65,7 +63,7 @@ struct bmap_mds_info {
 
 	struct resm_mds_info	*bmi_wr_ion;		/* pointer to write ION */
 	struct psc_lockedlist	 bmi_leases;		/* tracked bmap leases */
-	struct pfl_odt_receipt	*bmi_assign;
+	struct pfl_odt_receipt	*bmi_assign;		/* bmap <-> ION binding */
 	uint64_t		 bmi_seq;		/* Largest write bml seq # */
 
 	/*
@@ -75,16 +73,17 @@ struct bmap_mds_info {
 	 */
 	int32_t			 bmi_writers;
 	int32_t			 bmi_readers;
-	struct pfl_rwlock	 bmi_rwlock;
-	struct slm_update_data	 bmi_upd;
+	int32_t			 bmi_diocb;		/* # of DIO downgrade RPCs inflight */
+	struct pfl_rwlock	 bmi_rwlock;		/* rwlock for modifying bmap contents */
+	struct slm_update_data	 bmi_upd;		/* data for upsch (replication engine) */
 
 	/*
 	 * These fields are used when writing changes to bmap in-memory
 	 * before they hit persistent store.
 	 */
 	uint8_t			 bmi_orepls[SL_REPLICA_NBYTES];
-	int			 bmi_sys_prio;
-	int			 bmi_usr_prio;
+	int			 bmi_sys_prio;		/* upsch admin priority */
+	int			 bmi_usr_prio;		/* upsch user priority */
 };
 
 #define bmi_2_fcmh(bmi)		bmi_2_bmap(bmi)->bcm_fcmh
@@ -243,7 +242,7 @@ struct bmap_ios_assign {
 /* bia_flags */
 #define BIAF_DIO		(1 << 0)
 
-int	 mds_bmap_read(struct bmap *, enum rw, int);
+int	 mds_bmap_read(struct bmap *, int);
 int	 mds_bmap_write(struct bmap *, void *, void *);
 int	_mds_bmap_write_rel(const struct pfl_callerinfo *, struct bmap *, void *);
 

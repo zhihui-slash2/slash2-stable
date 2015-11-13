@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2007-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #ifndef _FIDC_CLI_H_
@@ -38,7 +36,7 @@ struct fidc_membh;
 
 struct fcmh_cli_info_file {
 	struct srt_inode	 inode;
-	uint32_t	 	 xattrsize;
+	uint32_t		 xattrsize;
 	int			 idxmap[SL_MAX_REPLICAS];
 	int			 mapstircnt;
 };
@@ -137,45 +135,24 @@ void	slc_fcmh_setattrf(struct fidc_membh *, struct srt_stat *, int);
 
 int	fcmh_checkcreds(struct fidc_membh *, struct pscfs_req *,
 	    const struct pscfs_creds *, int);
-int	fcmh_checkcreds_ctx(struct fidc_membh *,
-	    const struct pscfs_clientctx *, const struct pscfs_creds *,
-	    int);
+
+#define msl_fcmh_load(fid, fgen, fp, arg)				\
+	sl_fcmh_lookup((fid), (fgen), FIDC_LOOKUP_CREATE |		\
+	    FIDC_LOOKUP_LOAD, (fp), (arg))
+#define msl_fcmh_load_fg(fg, fp, arg)					\
+	msl_fcmh_load((fg)->fg_fid, (fg)->fg_gen, (fp), (arg))
+#define msl_fcmh_load_fid(fid, fp, arg)					\
+	msl_fcmh_load((fid), FGEN_ANY, (fp), (arg))
+
+#define msl_fcmh_peek(fid, fgen, fp, arg)				\
+	sl_fcmh_lookup((fid), (fgen), 0, (fp), (arg))
+#define msl_fcmh_peek_fg(fg, fp, arg)					\
+	msl_fcmh_peek((fg)->fg_fid, (fg)->fg_gen, (fp), (arg))
+#define msl_fcmh_peek_fid(fid, fp, arg)					\
+	msl_fcmh_peek((fid), FGEN_ANY, (fp), (arg))
 
 int	msl_fcmh_fetch_inode(struct fidc_membh *);
 void	msl_fcmh_stash_inode(struct fidc_membh *, struct srt_inode *);
 void	msl_fcmh_stash_xattrsize(struct fidc_membh *, uint32_t);
-
-#define fidc_lookup_load(fid, fcmhp, pfcc)				\
-	_fidc_lookup_load(PFL_CALLERINFOSS(SLSS_FCMH), (fid),		\
-	    (fcmhp), (pfcc))
-
-/*
- * Create the fcmh if it doesn't exist, loading its attributes from the MDS.
- */
-#define _pfl_callerinfo pci
-static __inline int
-_fidc_lookup_load(const struct pfl_callerinfo *pci, slfid_t fid,
-    struct fidc_membh **fcmhp, struct pscfs_clientctx *pfcc)
-{
-	struct sl_fidgen fg = { fid, FGEN_ANY };
-
-	return (_fidc_lookup(pci, &fg, FIDC_LOOKUP_CREATE |
-	    FIDC_LOOKUP_LOAD, fcmhp, pfcc));
-}
-
-static __inline int
-_fidc_lookup_peek(const struct pfl_callerinfo *pci, slfid_t fid,
-    struct fidc_membh **fcmhp, struct pscfs_clientctx *pfcc)
-{
-	struct sl_fidgen fg = { fid, FGEN_ANY };
-
-	return (_fidc_lookup(pci, &fg, FIDC_LOOKUP_NONE,
-	    fcmhp, pfcc));
-}
-#undef _pfl_callerinfo
-
-#define fidc_lookup_peek(fid, fcmhp, pfcc)				\
-	_fidc_lookup_peek(PFL_CALLERINFOSS(SLSS_FCMH), (fid),		\
-	    (fcmhp), (pfcc))
 
 #endif /* _FIDC_CLI_H_ */

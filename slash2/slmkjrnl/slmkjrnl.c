@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
- * Copyright (c) 2006-2014, Pittsburgh Supercomputing Center (PSC).
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
+ * Copyright 2006-2015, Pittsburgh Supercomputing Center
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include <err.h>
@@ -92,9 +90,9 @@ pjournal_format(const char *fn, uint32_t nents, uint32_t entsz,
 		psc_fatal("stat %s", fn);
 
 	/*
- 	 * If the user does not specify nents, either use default
- 	 * or based on the block device size.
- 	 */
+	 * If the user does not specify nents, either use default or
+	 * based on the block device size.
+	 */
 	if (nents == 0 && !block_dev)
 		nents = SLJ_MDS_JNENTS;
 
@@ -104,7 +102,7 @@ pjournal_format(const char *fn, uint32_t nents, uint32_t entsz,
 
 		/* show progress, it is going to be a while */
 		verbose = 1;
-		nents = numblocks - stb.st_blksize/SLJ_MDS_ENTSIZE - 16;  
+		nents = numblocks - stb.st_blksize/SLJ_MDS_ENTSIZE - 16;
 		nents = (nents / rs) * rs;
 	}
 

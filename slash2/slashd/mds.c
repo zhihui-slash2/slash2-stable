@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2006-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include "pfl/alloc.h"
@@ -168,18 +166,19 @@ mds_bmap_directio(struct bmap *b, enum rw rw, int want_dio,
 		return (0);
 
 	/*
-	 * We enter into the DIO mode in three cases:
+	 * We enter into DIO mode in three cases:
 	 *
-	 *  (1) Our caller wants a DIO lease
-	 *  (2) There is already a write lease out there
-	 *  (3) We want to a write lease when there are read leases out
-	 *	there.
+	 *  (1) Requester specifically wants a DIO lease (not currently
+	 *	possible).
+	 *  (2) There is already a write lease issued.
+	 *  (3) Requester wants a write lease when there are existing
+	 *	read leases.
 	 *
 	 * In addition, even if the current lease request does not
 	 * trigger a DIO by itself, it has to wait if there is a DIO
 	 * downgrade already in progress.
 	 */
-	if (!want_dio && (b->bcm_flags & BMAPF_DIOCB))
+	if (bmi->bmi_diocb)
 		want_dio = 1;
 
 	if (want_dio || bmi->bmi_writers ||
@@ -208,11 +207,9 @@ mds_bmap_directio(struct bmap *b, enum rw rw, int want_dio,
 				}
 
 				rc = -SLERR_BMAP_DIOWAIT;
-				if (!(bml->bml_flags & BML_DIOCB)) {
-					bml->bml_flags |= BML_DIOCB;
-					b->bcm_flags |= BMAPF_DIOCB;
+				if (!(bml->bml_flags & BML_DIOCB)) 
 					mdscoh_req(bml);
-				} else
+				else
 					BML_ULOCK(bml);
  next:
 				bml = bml->bml_chain;
@@ -222,7 +219,6 @@ mds_bmap_directio(struct bmap *b, enum rw rw, int want_dio,
 	if (!rc && (want_dio || force_dio)) {
 		OPSTAT_INCR("bmap-dio-set");
 		b->bcm_flags |= BMAPF_DIO;
-		b->bcm_flags &= ~BMAPF_DIOCB;
 	}
 	return (rc);
 }
@@ -659,7 +655,6 @@ mds_bmap_ios_assign(struct bmap_mds_lease *bml, sl_ios_id_t iosid)
 		// release odt ent?
 		return (-1); // errno
 	}
-	pfl_odt_freebuf(slm_bia_odt, bia, NULL);
 
 	bml->bml_seq = bia->bia_seq;
 
@@ -668,6 +663,8 @@ mds_bmap_ios_assign(struct bmap_mds_lease *bml, sl_ios_id_t iosid)
 	DEBUG_BMAP(PLL_DIAG, b, "using res(%s) "
 	    "rmmi(%p) bia(%p)", resm->resm_res->res_name,
 	    bmi->bmi_wr_ion, bmi->bmi_assign);
+
+	pfl_odt_freebuf(slm_bia_odt, bia, NULL);
 
 	return (0);
 }
@@ -1172,11 +1169,11 @@ mds_bmap_bml_release(struct bmap_mds_lease *bml)
 
 	BML_ULOCK(bml);
 
-	if ((b->bcm_flags & (BMAPF_DIO | BMAPF_DIOCB)) &&
+	/* Remove the direct I/O flag if possible. */
+	if (b->bcm_flags & BMAPF_DIO &&
 	    (!bmi->bmi_writers ||
 	     (bmi->bmi_writers == 1 && !bmi->bmi_readers))) {
-		/* Remove the directio flag if possible. */
-		b->bcm_flags &= ~(BMAPF_DIO | BMAPF_DIOCB);
+		b->bcm_flags &= ~BMAPF_DIO;
 		OPSTAT_INCR("bmap-dio-clr");
 	}
 
@@ -1699,7 +1696,7 @@ mds_bmap_load_fg(const struct sl_fidgen *fg, sl_bmapno_t bmapno,
 
 	psc_assert(*bp == NULL);
 
-	rc = fidc_lookup_fg(fg, &f);
+	rc = sl_fcmh_load_fg(fg, &f);
 	if (rc)
 		return (rc);
 

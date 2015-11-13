@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2008-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include <sys/types.h>
@@ -243,7 +241,7 @@ sli_rpc_newreq(struct slashrpc_cservice *csvc, int op,
     struct pscrpc_request **rqp, int qlen, int plen, void *mqp)
 {
 	if (csvc->csvc_peertype == SLCONNT_MDS) {
-		int rc, flags = 0, nq = 1, qlens[4] = { qlen };
+		int rc, flags = 0, nq = 1, qlens[3] = { qlen };
 		struct timespec now;
 
 		PFL_GETTIMESPEC(&now);
@@ -325,25 +323,16 @@ sli_rpc_allocrep(struct pscrpc_request *rq, void *mqp, int qlen,
     void *mpp, int plen, int rcoff)
 {
 	if (rq->rq_rqbd->rqbd_service == sli_rim_svc.svh_service) {
-		int rc, np = 1, plens[3] = { plen };
 		struct pscrpc_msg *qm = rq->rq_reqmsg;
+		int np = 1, plens[3] = { plen };
 
 		if (qm->flags & SLRPC_MSGF_STATFS)
 			plens[np++] = sizeof(struct srt_statfs) +
 			    sizeof(struct srt_bwqueued);
 		if (np > 1) {
 			plens[np++] = sizeof(struct srt_authbuf_footer);
-			rc = slrpc_allocrepn(rq, mqp, qlen, mpp, np,
-			    plens, rcoff);
-			if (rc == 0) {
-				struct pscrpc_msg *pm;
-				int idx = 1;
-
-				pm = rq->rq_repmsg;
-				if (qm->flags & SLRPC_MSGF_STATFS)
-					sli_rpc_mds_pack_statfs(pm, idx++);
-			}
-			return (rc);
+			return (slrpc_allocrepn(rq, mqp, qlen, mpp, np,
+			    plens, rcoff));
 		}
 	}
 	return (slrpc_allocgenrep(rq, mqp, qlen, mpp, plen, rcoff));

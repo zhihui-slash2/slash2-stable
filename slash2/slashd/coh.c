@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2008-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -53,9 +51,18 @@
 void
 slm_coh_bml_release(struct bmap_mds_lease *bml)
 {
+	struct bmap_mds_info *bmi;
+	struct bmap *b;
+
 	BML_LOCK(bml);
 	bml->bml_flags &= ~BML_DIOCB;
 	BML_ULOCK(bml);
+
+	bmi = bml->bml_bmi;
+	b = bmi_2_bmap(bmi);
+	BMAP_LOCK(b);
+	bmi->bmi_diocb--;
+	BMAP_ULOCK(b);
 
 	mds_bmap_bml_release(bml);
 }
@@ -113,14 +120,22 @@ mdscoh_req(struct bmap_mds_lease *bml)
 	struct pscrpc_request *rq = NULL;
 	struct srm_bmap_dio_req *mq;
 	struct srm_bmap_dio_rep *mp;
+	struct bmap_mds_info *bmi;
+	struct bmap *b;
 	int rc;
 
 	DEBUG_BMAP(PLL_DIAG, bml_2_bmap(bml), "bml=%p", bml);
 
+	bmi = bml->bml_bmi;
+	b = bmi_2_bmap(bmi);
+
 	BML_LOCK_ENSURE(bml);
+	BMAP_LOCK_ENSURE(b);
 
 	/* Take a reference for the asynchronous RPC. */
+	bmi->bmi_diocb++;
 	bml->bml_refcnt++;
+	bml->bml_flags |= BML_DIOCB;
 
 	if (bml->bml_flags & BML_RECOVER) {
 		psc_assert(!bml->bml_exp);

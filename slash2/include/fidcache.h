@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2006-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -52,12 +50,12 @@ struct sl_fcmh_ops {
 	void	(*sfop_dtor)(struct fidc_membh *);
 	int	(*sfop_getattr)(struct fidc_membh *, void *);
 	void	(*sfop_postsetattr)(struct fidc_membh *);
-	int	(*sfop_modify)(struct fidc_membh *, const struct sl_fidgen *);
+	int	(*sfop_modify)(struct fidc_membh *, slfgen_t);
 };
 
-/**
- * fidc_membh - The primary cached file structure; all updates and
- * lookups into the inode are done through here.
+/*
+ * The primary in-memory file structure; all updates and lookups into the
+ * inode are done through here.
  *
  * fidc_membh tracks cached bmaps (bmaptree) and clients (via their
  * exports) which hold cached bmaps.
@@ -99,12 +97,14 @@ struct fidc_membh {
 /* number of seconds in which attribute times out */
 #define FCMH_ATTR_TIMEO		8
 
-#define FCMH_LOCK(f)		spinlock_pci(PFL_CALLERINFOSS(SLSS_FCMH), &(f)->fcmh_lock)
-#define FCMH_ULOCK(f)		freelock_pci(PFL_CALLERINFOSS(SLSS_FCMH), &(f)->fcmh_lock)
-#define FCMH_TRYLOCK(f)		trylock_pci(PFL_CALLERINFOSS(SLSS_FCMH), &(f)->fcmh_lock)
-#define FCMH_TRYRLOCK(f, lk)	tryreqlock_pci(PFL_CALLERINFOSS(SLSS_FCMH), &(f)->fcmh_lock, (lk))
-#define FCMH_RLOCK(f)		reqlock_pci(PFL_CALLERINFOSS(SLSS_FCMH), &(f)->fcmh_lock)
-#define FCMH_URLOCK(f, lk)	ureqlock_pci(PFL_CALLERINFOSS(SLSS_FCMH), &(f)->fcmh_lock, (lk))
+#define FCMH_PCI		PFL_CALLERINFOSS(SLSS_FCMH)
+
+#define FCMH_LOCK(f)		spinlock_pci(FCMH_PCI, &(f)->fcmh_lock)
+#define FCMH_ULOCK(f)		freelock_pci(FCMH_PCI, &(f)->fcmh_lock)
+#define FCMH_TRYLOCK(f)		trylock_pci(FCMH_PCI, &(f)->fcmh_lock)
+#define FCMH_TRYRLOCK(f, lk)	tryreqlock_pci(FCMH_PCI, &(f)->fcmh_lock, (lk))
+#define FCMH_RLOCK(f)		reqlock_pci(FCMH_PCI, &(f)->fcmh_lock)
+#define FCMH_URLOCK(f, lk)	ureqlock_pci(FCMH_PCI, &(f)->fcmh_lock, (lk))
 #define FCMH_LOCK_ENSURE(f)	LOCK_ENSURE(&(f)->fcmh_lock)
 #define FCMH_HAS_LOCK(f)	psc_spin_haslock(&(f)->fcmh_lock)
 
@@ -249,11 +249,11 @@ struct fidc_membh {
 	    (f)->fcmh_sstb.sst_mode, ## __VA_ARGS__)
 
 /* types of references */
-#define FCMH_OPCNT_BMAP			 0	/* bcm_fcmh backpointer */
-#define FCMH_OPCNT_LOOKUP_FIDC		 1	/* fidc_lookup() */
-#define FCMH_OPCNT_NEW			 2
+#define FCMH_OPCNT_BMAP			 0	/* all: bcm_fcmh backpointer */
+#define FCMH_OPCNT_LOOKUP_FIDC		 1	/* all: fidc_lookup() */
+#define FCMH_OPCNT_NEW			 2	/* all: early initialization */
 #define FCMH_OPCNT_OPEN			 3	/* CLI: pscfs file info */
-#define FCMH_OPCNT_WAIT			 4	/* dup ref during initialization */
+#define FCMH_OPCNT_WAIT			 4	/* all: dup ref during initialization */
 #define FCMH_OPCNT_WORKER		 5	/* MDS: generic worker */
 #define FCMH_OPCNT_DIRTY_QUEUE		 6	/* CLI: attribute flushing */
 #define FCMH_OPCNT_UPSCH		 7	/* MDS: temporarily held by upsch engine */
@@ -263,53 +263,63 @@ struct fidc_membh {
 #define FCMH_OPCNT_MAXTYPE		11
 
 void	fidc_init(int);
-
-/* fidc_lookup() flags */
-#define FIDC_LOOKUP_NONE		0
-#define FIDC_LOOKUP_CREATE		(1 << 0)	/* Create if not present		*/
-#define FIDC_LOOKUP_EXCL		(1 << 1)	/* Fail if fcmh is present		*/
-#define FIDC_LOOKUP_LOAD		(1 << 2)	/* Use external fetching mechanism	*/
-#define FIDC_LOOKUP_NOLOG		(1 << 3)
-
 int	fidc_reap(int, int);
 
 void	sl_freapthr_spawn(int, const char *);
 
-int	_fidc_lookup(const struct pfl_callerinfo *,
-	    const struct sl_fidgen *, int,
-	    struct fidc_membh **, void *);
+/* fidc_lookup() flags */
+#define FIDC_LOOKUP_CREATE		(1 << 0)	/* create if not present */
+#define FIDC_LOOKUP_EXCL		(1 << 1)	/* fail if fcmh is present */
+#define FIDC_LOOKUP_LOAD		(1 << 2)	/* use external fetching mechanism */
+#define FIDC_LOOKUP_LOCK		(1 << 3)	/* leave locked upon return */
 
-#define fidc_lookup(fgp, lkfl, fp)					\
-	_fidc_lookup(PFL_CALLERINFOSS(SLSS_FCMH), (fgp), (lkfl), (fp),	\
-	    NULL)
+int	_fidc_lookup(const struct pfl_callerinfo *, slfid_t, slfgen_t,
+	    int, struct fidc_membh **, void *);
 
-#define fidc_lookup_fg(fgp, fp)		fidc_lookup((fgp), 0, (fp))
+#define sl_fcmh_lookup(fid, fgen, flags, fp, arg)			\
+	_fidc_lookup(FCMH_PCI, (fid), (fgen), (flags), (fp), (arg))
 
-#define fidc_lookup_fid(fid, fp)					\
-	_PFL_RVSTART {							\
-		struct sl_fidgen _fg = { (fid), FGEN_ANY };		\
-									\
-		fidc_lookup(&_fg, 0, (fp));				\
-	} _PFL_RVEND
+#define sl_fcmh_lookup_fg(fg, flags, fp)				\
+	sl_fcmh_lookup((fg)->fg_fid, (fg)->fg_gen, (flags), (fp), NULL)
+
+#define sl_fcmh_get_fg(fgp, fp)						\
+	sl_fcmh_lookup_fg((fgp), FIDC_LOOKUP_CREATE, (fp))
+
+#define sl_fcmh_load(fid, fgen, fp)					\
+	sl_fcmh_lookup((fid), (fgen), FIDC_LOOKUP_CREATE |		\
+	    FIDC_LOOKUP_LOAD, (fp), NULL)
+#define sl_fcmh_load_fg(fg, fp)						\
+	sl_fcmh_load((fg)->fg_fid, (fg)->fg_gen, (fp))
+#define sl_fcmh_load_fid(fid, fp)					\
+	sl_fcmh_load((fid), FGEN_ANY, (fp))
+
+#define sl_fcmh_peek(fid, fgen, fp)					\
+	sl_fcmh_lookup((fid), (fgen), 0, (fp), NULL)
+#define sl_fcmh_peek_fg(fg, fp)						\
+	sl_fcmh_peek((fg)->fg_fid, (fg)->fg_gen, (fp))
+#define sl_fcmh_peek_fid(fid, fp)					\
+	sl_fcmh_peek((fid), FGEN_ANY, (fp))
 
 ssize_t	 fcmh_getsize(struct fidc_membh *);
 
-void	_fcmh_op_start_type(const struct pfl_callerinfo *, struct fidc_membh *, int);
-void	_fcmh_op_done_type(const struct pfl_callerinfo *, struct fidc_membh *, int);
-
 #define fcmh_op_start_type(f, type)					\
-	_fcmh_op_start_type(PFL_CALLERINFOSS(SLSS_FCMH), (f), (type))
-
+	_fcmh_op_start_type(FCMH_PCI, (f), (type))
 #define fcmh_op_done_type(f, type)					\
-	_fcmh_op_done_type(PFL_CALLERINFOSS(SLSS_FCMH), (f), (type))
+	_fcmh_op_done_type(FCMH_PCI, (f), (type), 0)
 
-#define fcmh_op_done(f)		fcmh_op_done_type((f), FCMH_OPCNT_LOOKUP_FIDC)
+#define fcmh_op_done(f)							\
+    fcmh_op_done_type((f), FCMH_OPCNT_LOOKUP_FIDC)
+
+void	_fcmh_op_start_type(const struct pfl_callerinfo *,
+	    struct fidc_membh *, int);
+void	_fcmh_op_done_type(const struct pfl_callerinfo *,
+	    struct fidc_membh *, int, int);
 
 void	_dump_fcmh_flags_common(int *, int *);
 
 extern struct sl_fcmh_ops	 sl_fcmh_ops;
 extern struct psc_poolmgr	*fidcPool;
-extern struct psc_hashtbl	 fidcHtable;
+extern struct psc_hashtbl	 sl_fcmh_hashtbl;
 
 static __inline void *
 fcmh_get_pri(struct fidc_membh *f)

@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2009-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include <stdio.h>
@@ -170,9 +168,10 @@ slctlrep_getfcmh(int fd, struct psc_ctlmsghdr *mh, void *m)
 
 	rc = 1;
 	if (scf->scf_fg.fg_fid == FID_ANY) {
-		PSC_HASHTBL_FOREACH_BUCKET(b, &fidcHtable) {
+		PSC_HASHTBL_FOREACH_BUCKET(b, &sl_fcmh_hashtbl) {
 			psc_hashbkt_lock(b);
-			PSC_HASHBKT_FOREACH_ENTRY(&fidcHtable, f, b) {
+			PSC_HASHBKT_FOREACH_ENTRY(&sl_fcmh_hashtbl, f,
+			    b) {
 				if (scf->scf_fg.fg_gen == SLCTL_FCL_BUSY &&
 				    (f->fcmh_flags & FCMH_IDLE))
 					continue;
@@ -185,8 +184,7 @@ slctlrep_getfcmh(int fd, struct psc_ctlmsghdr *mh, void *m)
 				break;
 		}
 	} else {
-		rc = fidc_lookup_fid(scf->scf_fg.fg_fid, &f);
-		if (rc) {
+		if (sl_fcmh_peek_fid(scf->scf_fg.fg_fid, &f)) {
 			rc = psc_ctlsenderr(fd, mh,
 			    "FID "SLPRI_FID" not in cache",
 			    scf->scf_fg.fg_fid);
@@ -208,9 +206,9 @@ slctlrep_getbmap(int fd, struct psc_ctlmsghdr *mh, void *m)
 	int rc;
 
 	rc = 1;
-	PSC_HASHTBL_FOREACH_BUCKET(hb, &fidcHtable) {
+	PSC_HASHTBL_FOREACH_BUCKET(hb, &sl_fcmh_hashtbl) {
 		psc_hashbkt_lock(hb);
-		PSC_HASHBKT_FOREACH_ENTRY(&fidcHtable, f, hb) {
+		PSC_HASHBKT_FOREACH_ENTRY(&sl_fcmh_hashtbl, f, hb) {
 			pfl_rwlock_rdlock(&f->fcmh_rwlock);
 			RB_FOREACH(b, bmaptree, &f->fcmh_bmaptree) {
 				rc = slctlmsg_bmap_send(fd, mh, scb, b);

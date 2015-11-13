@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2006-2014, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #ifndef _FIDC_MDS_H_
@@ -98,10 +96,8 @@ struct fcmh_mds_info {
 #define IS_REMOTE_FID(fid)						\
 	((fid) != SLFID_ROOT && nodeSite->site_id != FID_GET_SITEID(fid))
 
-#define slm_fcmh_get_nolog(fgp, fp)					\
-				fidc_lookup((fgp), FIDC_LOOKUP_CREATE | FIDC_LOOKUP_NOLOG, (fp))
-#define slm_fcmh_get(fgp, fp)	fidc_lookup((fgp), FIDC_LOOKUP_CREATE, (fp))
-#define slm_fcmh_peek(fgp, fp)	fidc_lookup((fgp), FIDC_LOOKUP_NONE, (fp))
+#define slm_fcmh_get(fgp, fp)	sl_fcmh_get_fg((fgp), (fp))
+#define slm_fcmh_peek(fgp, fp)	sl_fcmh_peek_fg((fgp), 0, (fp))
 
 #define mds_fcmh_setattr(vfsid, f, to_set, sstb)	_mds_fcmh_setattr((vfsid), (f), (to_set), (sstb), 1)
 #define mds_fcmh_setattr_nolog(vfsid, f, to_set, sstb)	_mds_fcmh_setattr((vfsid), (f), (to_set), (sstb), 0)

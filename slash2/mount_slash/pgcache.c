@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2009-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -275,6 +273,9 @@ bmpce_release(struct bmap_pagecache_entry *e)
 	    BMPCEF_EIO | BMPCEF_DISCARD)) == BMPCEF_DATARDY) {
 		BMPCE_ULOCK(e);
 
+		/*
+		 * XXX Need to recheck flags after grabbing the lock.
+		 */
 		if ((e->bmpce_flags & (BMPCEF_READAHEAD |
 		    BMPCEF_ACCESSED)) == BMPCEF_READAHEAD) {
 			LIST_CACHE_LOCK(&msl_readahead_pages);
@@ -641,6 +642,7 @@ dump_biorq_flags(uint32_t flags)
 	PFL_PRFLAG(BIORQ_WAIT, &flags, &seq);
 	PFL_PRFLAG(BIORQ_ONTREE, &flags, &seq);
 	PFL_PRFLAG(BIORQ_READAHEAD, &flags, &seq);
+	PFL_PRFLAG(BIORQ_AIOWAKE, &flags, &seq);
 	if (flags)
 		printf(" unknown: %#x", flags);
 	printf("\n");

@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2006-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #ifndef _MOUNT_SLASH_H_
@@ -88,7 +86,7 @@ struct msflush_thread {
 struct msfs_thread {
 	size_t				 mft_uniqid;
 	struct psc_multiwait		 mft_mw;
-	char				 mft_uprog[256];
+	char				 mft_uprog[128];
 	struct pscfs_req		*mft_pfr;
 };
 
@@ -150,7 +148,7 @@ struct slc_wkdata_readdir {
 struct msl_fhent {
 	psc_spinlock_t			 mfh_lock;
 	struct fidc_membh		*mfh_fcmh;
-	struct psclist_head		 mfh_lentry;
+	struct psc_listentry		 mfh_lentry;
 	int				 mfh_flags;
 	int				 mfh_refcnt;
 	pid_t				 mfh_pid;
@@ -169,7 +167,8 @@ struct msl_fhent {
 	struct pfl_timespec		 mfh_open_atime;/* st_atime at open(2) time */
 	off_t				 mfh_nbytes_rd;
 	off_t				 mfh_nbytes_wr;
-	char				 mfh_uprog[256];
+	struct sl_fidgen		 mfh_fg;	/* used during serialization */
+	char				 mfh_uprog[128];
 };
 
 #define MFHF_CLOSING			(1 << 0)	/* close(2) has been issued */
@@ -287,8 +286,10 @@ struct gid_mapping {
 
 #define msl_biorq_release(r)		_msl_biorq_release(PFL_CALLERINFOSS(SLSS_FCMH), (r))
 
-int	 msl_bmap_to_csvc(struct bmap *, int, struct slashrpc_cservice **);
-void	 msl_bmap_reap_init(struct bmap *, const struct srt_bmapdesc *);
+void	 msl_bmap_stash_lease(struct bmap *,
+	    const struct srt_bmapdesc *, int, const char *);
+int	 msl_bmap_to_csvc(struct bmap *, int, struct sl_resm **, struct slashrpc_cservice **);
+void	 msl_bmap_reap_init(struct bmap *);
 void	 msl_bmpces_fail(struct bmpc_ioreq *, int);
 void	_msl_biorq_release(const struct pfl_callerinfo *, struct bmpc_ioreq *);
 
@@ -301,9 +302,8 @@ int	 msl_stat(struct fidc_membh *, void *);
 int	 msl_read_cleanup(struct pscrpc_request *, int, struct pscrpc_async_args *);
 int	 msl_dio_cleanup(struct pscrpc_request *, int, struct pscrpc_async_args *);
 
-ssize_t	 slc_getxattr(const struct pscfs_clientctx *,
-	    const struct pscfs_creds *, const char *, void *, size_t,
-	    struct fidc_membh *, size_t *);
+ssize_t	 slc_getxattr(struct pscfs_req *pfr, const struct pscfs_creds *,
+	    const char *, void *, size_t, struct fidc_membh *, size_t *);
 
 size_t	 msl_pages_copyout(struct bmpc_ioreq *, struct msl_fsrqinfo *);
 int	 msl_fd_should_retry(struct msl_fhent *, struct pscfs_req *, int);
@@ -311,9 +311,14 @@ int	 msl_fd_should_retry(struct msl_fhent *, struct pscfs_req *, int);
 void	 msl_update_iocounters(struct pfl_iostats_grad *, enum rw, int);
 
 int	 msl_try_get_replica_res(struct bmap *, int, int,
-	    struct slashrpc_cservice **);
+	    struct sl_resm **, struct slashrpc_cservice **);
 struct msl_fhent *
 	 msl_fhent_new(struct pscfs_req *, struct fidc_membh *);
+
+#define msl_resm_throttle_wait(m)	_msl_resm_throttle((m), 1)
+#define msl_resm_throttle_nowait(m)	_msl_resm_throttle((m), 0)
+
+int	 _msl_resm_throttle(struct sl_resm *, int);
 
 void	 msbmapthr_spawn(void);
 void	 msctlthr_spawn(void);
@@ -379,6 +384,7 @@ extern struct psc_poolmgr	*slc_mfh_pool;
 extern int			 slc_direct_io;
 extern int			 slc_root_squash;
 extern int			 slc_max_nretries;
+extern int			 msl_acl;
 extern int			 msl_predio_window_size;
 extern int			 msl_predio_issue_minpages;
 extern int			 msl_predio_issue_maxpages;

@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2007-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,16 +16,13 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include "pfl/cdefs.h"
 #include "pfl/fs.h"
+#include "pfl/fsmod.h"
 #include "pfl/list.h"
 #include "pfl/rpc.h"
 #include "pfl/rsx.h"
@@ -39,7 +38,7 @@
 
 struct sl_resm			*slc_rmc_resm;
 struct pscrpc_svc_handle	*msl_rci_svh;
-struct pscrpc_svc_handle	*msl_rcm_svh; 
+struct pscrpc_svc_handle	*msl_rcm_svh;
 
 __static void
 slc_rci_init(void)
@@ -63,13 +62,13 @@ slc_rcm_init(void)
 	    thr->pscthr_name);
 }
 
-/**
- * slc_rpc_initsvc: Initialize CLI RPC services.
+/*
+ * Initialize CLI RPC services.
  */
 void
 slc_rpc_initsvc(void)
 {
-	struct pscrpc_svc_handle *svh; 
+	struct pscrpc_svc_handle *svh;
 
 	/* Setup request service for CLI from MDS. */
 	msl_rcm_svh = svh = PSCALLOC(sizeof(*svh));
@@ -103,8 +102,8 @@ slc_rpc_initsvc(void)
 }
 
 /*
- * This function is called once at mount time. If the MDS changes, we have
- * to remount.
+ * This function is called once at mount time.  If the MDS changes, we
+ * have to remount.
  */
 int
 slc_rmc_setmds(const char *name)
@@ -124,12 +123,12 @@ slc_rmc_setmds(const char *name)
 	return (0);
 }
 
-/**
- * slc_rmc_retry_pfcc - Determine if process doesn't want to wait or if
- *	maximum allowed timeout has been reached for MDS communication.
+/*
+ * Determine if process doesn't want to wait or if maximum allowed
+ * timeout has been reached for MDS communication.
  */
 int
-slc_rmc_retry_pfcc(const struct pscfs_clientctx *pfcc, int *rc)
+slc_rmc_retry(struct pscfs_req *pfr, int *rc)
 {
 	int retry = 1;
 
@@ -156,18 +155,22 @@ slc_rmc_retry_pfcc(const struct pscfs_clientctx *pfcc, int *rc)
 	}
 
 //	retry = global setting
-	if (pfcc)
+	if (pfr) {
+		if (pfr->pfr_interrupted) {
+			*rc = EINTR;
+			retry = 0;
+		}
 //		retry = read_proc_env(ctx->pid, "");
-		;
-	else
+	} else
 		retry = 0;
 //	retry = hard timeout
 	*rc = retry ? 0 : ETIMEDOUT;
+
 	return (retry);
 }
 
 int
-slc_rmc_getcsvc(const struct pscfs_clientctx *pfcc,
+slc_rmc_getcsvc(struct pscfs_req *pfr,
     struct sl_resm *resm, struct slrpc_cservice **csvcp)
 {
 	int rc;
@@ -184,7 +187,7 @@ slc_rmc_getcsvc(const struct pscfs_clientctx *pfcc,
 			break;
 
 		rc = resm->resm_csvc->csvc_lasterrno;
-		if (!slc_rmc_retry_pfcc(pfcc, &rc))
+		if (!slc_rmc_retry(pfr, &rc))
 			break;
 		sl_csvc_waitrel_s(resm->resm_csvc, CSVC_RECONNECT_INTV);
 	}

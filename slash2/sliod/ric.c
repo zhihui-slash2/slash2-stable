@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2008-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 /*
@@ -398,7 +396,8 @@ sli_ric_handle_rlsbmap(struct pscrpc_request *rq)
 		rc = sli_fcmh_peek(&sbd->sbd_fg, &f);
 		if (rc) {
 			OPSTAT_INCR("rlsbmap-fail");
-			psclog_warnx("get bmap for "SLPRI_FG" rc=%d",
+			psclog(rc == ENOENT ? PLL_DIAG : PLL_ERROR,
+			    "load fcmh failed; fid="SLPRI_FG" rc=%d",
 			    SLPRI_FG_ARGS(&sbd->sbd_fg), rc);
 			continue;
 		}
@@ -446,13 +445,22 @@ sli_ric_handle_rlsbmap(struct pscrpc_request *rq)
 			BMAP_ULOCK(b);
 			newsbd = psc_pool_get(bmap_rls_pool);
 			BMAP_LOCK(b);
-			memcpy(newsbd, sbd, sizeof(*sbd));
 
-			DEBUG_FCMH(PLL_DIAG, f,
-			    "bmapno=%d seq=%"PRId64" key=%"PRId64" (brls=%p)",
-			    b->bcm_bmapno, sbd->sbd_seq, sbd->sbd_key, newsbd);
+			/*
+			 * Reaper thread has marked this bmap for
+			 * release so do a no-op.
+			 */
+			if (b->bcm_flags & BMAPF_RELEASING) {
+				psc_pool_return(bmap_rls_pool, newsbd);
+			} else {
+				memcpy(newsbd, sbd, sizeof(*sbd));
 
-			pll_add(&bii->bii_rls, newsbd);
+				DEBUG_BMAP(PLL_DIAG, b, "brls=%p "
+				    "seq=%"PRId64" key=%"PRId64,
+				    newsbd, sbd->sbd_seq, sbd->sbd_key);
+
+				pll_add(&bii->bii_rls, newsbd);
+			}
 		}
 
 		bmap_op_done(b);
@@ -509,7 +517,7 @@ sli_ric_handler(struct pscrpc_request *rq)
 		return (pscrpc_error(rq));
 	}
  out:
-	authbuf_sign(rq, PSCRPC_MSG_REPLY);
+	slrpc_rep_out(rq);
 	pscrpc_target_send_reply_msg(rq, rc, 0);
 	return (rc);
 }

@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2014-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #include <acl/libacl.h>
@@ -37,8 +35,8 @@
  * Pull POSIX ACLs from an fcmh via RPCs to MDS.
  */
 acl_t
-slc_acl_get_fcmh(const struct pscfs_clientctx *pfcc,
-    const struct pscfs_creds *pcr, struct fidc_membh *f)
+slc_acl_get_fcmh(struct pscfs_req *pfr, const struct pscfs_creds *pcr,
+    struct fidc_membh *f)
 {
 	char trybuf[64] = { 0 };
 	void *buf = NULL;
@@ -46,13 +44,13 @@ slc_acl_get_fcmh(const struct pscfs_clientctx *pfcc,
 	ssize_t rc;
 	acl_t a;
 
-	rc = slc_getxattr(pfcc, pcr, ACL_EA_ACCESS, trybuf,
+	rc = slc_getxattr(pfr, pcr, ACL_EA_ACCESS, trybuf,
 	    sizeof(trybuf), f, &retsz);
 	if (rc == 0) {
 		buf = trybuf;
 	} else if (rc == ERANGE) {
 		buf = PSCALLOC(retsz);
-		rc = slc_getxattr(pfcc, pcr, ACL_EA_ACCESS, buf, retsz,
+		rc = slc_getxattr(pfr, pcr, ACL_EA_ACCESS, buf, retsz,
 		    f, &retsz);
 		if (rc) {
 			PSCFREE(buf);
@@ -163,26 +161,25 @@ sl_checkacls(acl_t a, struct srt_stat *sstb,
 	}
 #ifdef SLOPT_POSIX_ACLS_REVERT
 	else
-		rv = checkcreds(sstb, pcrp, accmode, slc_root_squash);
+		rv = checkcreds(sstb, pcrp, accmode);
 #endif
 	return (rv);
 }
 
 int
-sl_fcmh_checkacls(struct fidc_membh *f,
-    const struct pscfs_clientctx *pfcc, const struct pscfs_creds *pcrp,
-    int accmode)
+sl_fcmh_checkacls(struct fidc_membh *f, struct pscfs_req *pfr,
+    const struct pscfs_creds *pcrp, int accmode)
 {
 	int locked, rv;
 	acl_t a;
 
-	a = slc_acl_get_fcmh(pfcc, pcrp, f);
+	a = slc_acl_get_fcmh(pfr, pcrp, f);
 	if (a == NULL) {
 		int rc;
 
 #ifdef SLOPT_POSIX_ACLS_REVERT
 		locked = FCMH_RLOCK(f);
-		rc = checkcreds(&f->fcmh_sstb, pcrp, accmode, slc_root_squash);
+		rc = checkcreds(&f->fcmh_sstb, pcrp, accmode);
 		FCMH_URLOCK(f, locked);
 #else
 		rc = EACCES;

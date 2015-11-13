@@ -1,8 +1,10 @@
 /* $Id$ */
 /*
- * %PSCGPL_START_COPYRIGHT%
- * -----------------------------------------------------------------------------
+ * %GPL_START_LICENSE%
+ * ---------------------------------------------------------------------
+ * Copyright 2015, Google, Inc.
  * Copyright (c) 2008-2015, Pittsburgh Supercomputing Center (PSC).
+ * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,12 +16,8 @@
  * PURPOSE.  See the GNU General Public License contained in the file
  * `COPYING-GPL' at the top of this distribution or at
  * https://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * Pittsburgh Supercomputing Center	phone: 412.268.4960  fax: 412.268.5832
- * 300 S. Craig Street			e-mail: remarks@psc.edu
- * Pittsburgh, PA 15213			web: http://www.psc.edu/
- * -----------------------------------------------------------------------------
- * %PSC_END_COPYRIGHT%
+ * ---------------------------------------------------------------------
+ * %END_LICENSE%
  */
 
 #define PSC_SUBSYS SLSS_BMAP
@@ -46,6 +44,8 @@ enum {
 	MSL_BMODECHG_CBARG_COMPL,
 	MSL_BMODECHG_CBARG_CSVC,
 };
+
+void msl_bmap_reap_init(struct bmap *);
 
 int bmap_max_cache = BMAP_CACHE_MAX;
 
@@ -82,17 +82,49 @@ msl_bmap_init(struct bmap *b)
  * Save a bmap lease received from the MDS.
  */
 void
-msl_bmap_stash_lease(struct bmap *b, struct srt_bmapdesc *sbd)
+msl_bmap_stash_lease(struct bmap *b, const struct srt_bmapdesc *sbd,
+    int rc, const char *action)
 {
+	struct bmap_cli_info *bci = bmap_2_bci(b);
+
 	BMAP_LOCK_ENSURE(b);
 
-	/*
-	 * Yes, this is looks like a redundant check but I have seen
-	 * cases where fid==0 yet the memchk succeeds.
-	 */
-	psc_assert(sbd->sbd_fg.fg_fid);
-	psc_assert(!pfl_memchk(sbd, 0, sizeof(*sbd)));
-	memcpy(bmap_2_sbd(b), sbd, sizeof(struct srt_bmapdesc));
+	if (rc) {
+		PFL_GETTIMESPEC(&bci->bci_etime);
+		bci->bci_error = rc;
+		b->bcm_flags |= BMAPF_LEASEFAILED;
+
+		DEBUG_BMAP(PLL_ERROR, b, "stash lease failed action=%s "
+		    "rc=%d", action, rc);
+	} else {
+		psc_assert(sbd->sbd_seq);
+		psc_assert(sbd->sbd_fg.fg_fid);
+		psc_assert(sbd->sbd_fg.fg_fid == fcmh_2_fid(b->bcm_fcmh));
+
+		if (b->bcm_flags & BMAPF_WR)
+			psc_assert(sbd->sbd_ios != IOS_ID_ANY);
+
+		bci->bci_error = 0;
+		b->bcm_flags &= ~BMAPF_LEASEFAILED;
+
+		/*
+		 * Record the start time.
+		 *
+		 * XXX the directio status of the bmap needs to be
+		 *     returned by the MDS so we can set the proper
+		 * expiration time.
+		 */
+		PFL_GETTIMESPEC(&bci->bci_etime);
+		timespecadd(&bci->bci_etime, &msl_bmap_max_lease,
+		    &bci->bci_etime);
+
+		*bmap_2_sbd(b) = *sbd;
+
+		DEBUG_BMAP(PLL_DIAG, b, "stash lease; action=%s "
+		    "nseq=%"PRId64" ios=%#x etime="PSCPRI_TIMESPEC,
+		    action, sbd->sbd_seq, sbd->sbd_ios,
+		    PFLPRI_PTIMESPEC_ARGS(&bci->bci_etime));
+	}
 }
 
 int
@@ -102,43 +134,43 @@ msl_rmc_bmodechg_cb(struct pscrpc_request *rq,
 	struct slashrpc_cservice *csvc = args->pointer_arg[MSL_BMODECHG_CBARG_CSVC];
 	struct psc_compl *compl = args->pointer_arg[MSL_BMODECHG_CBARG_COMPL];
 	struct bmap *b = args->pointer_arg[MSL_BMODECHG_CBARG_BMAP];
-	struct bmap_cli_info *bci = bmap_2_bci(b);
 	struct srm_bmap_chwrmode_rep *mp;
 	struct sl_resource *r;
 	int rc;
 
 	SL_GET_RQ_STATUS(csvc, rq, mp, rc);
 
-	if (rc) {
-		BMAP_LOCK(b);
-		bci->bci_error = rc;
-		b->bcm_flags |= BMAPF_LEASEFAILED;
-		BMAP_ULOCK(b);
-	} else {
-		BMAP_LOCK(b);
-		msl_bmap_stash_lease(b, &mp->sbd);
-		BMAP_ULOCK(b);
-
+	BMAP_LOCK(b);
+	msl_bmap_stash_lease(b, &mp->sbd, rc, "modechange");
+	if (!rc) {
+		psc_assert((b->bcm_flags & BMAP_RW_MASK) == BMAPF_RD);
+		b->bcm_flags = (b->bcm_flags & ~BMAPF_RD) | BMAPF_WR;
 		r = libsl_id2res(bmap_2_sbd(b)->sbd_ios);
-		psc_assert(r);
 		if (r->res_type == SLREST_ARCHIVAL_FS) {
 			/*
 			 * Prepare for archival write by ensuring that all
 			 * subsequent IO's are direct.
 			 */
-			BMAP_LOCK(b);
 			b->bcm_flags |= BMAPF_DIO;
-			BMAP_ULOCK(b);
 
+			BMAP_ULOCK(b);
 			msl_bmap_cache_rls(b);
+			BMAP_LOCK(b);
 		}
 	}
 
-	if (compl)
+	if (compl) {
+		BMAP_ULOCK(b);
+
+		/* synchronous */
 		psc_compl_ready(compl, 1);
-	else
+	} else {
+		/* asynchronous */
+		b->bcm_flags &= ~BMAPF_MODECHNG;
+
 		/* will do bmap_wake_locked() for anyone waiting for us */
 		bmap_op_done_type(b, BMAP_OPCNT_ASYNC);
+	}
 
 	sl_csvc_decref(csvc);
 	return (rc);
@@ -178,12 +210,19 @@ msl_bmap_modeset(struct bmap *b, enum rw rw, int flags)
  retry:
 	psc_assert(b->bcm_flags & BMAPF_MODECHNG);
 
-	if (b->bcm_flags & BMAPF_WR)
+	if (b->bcm_flags & BMAPF_WR) {
 		/*
 		 * Write enabled bmaps are allowed to read with no
 		 * further action being taken.
 		 */
+		if (flags & BMAPGETF_NONBLOCK) {
+			BMAP_LOCK(b);
+			b->bcm_flags &= ~BMAPF_MODECHNG;
+			BMAP_ULOCK(b);
+		}
 		return (0);
+	}
+
 	/* Add write mode to this bmap. */
 
 	psc_assert(rw == SL_WRITE && (b->bcm_flags & BMAPF_RD));
@@ -209,24 +248,24 @@ msl_bmap_modeset(struct bmap *b, enum rw rw, int flags)
 	rq->rq_async_args.pointer_arg[MSL_BMODECHG_CBARG_BMAP] = b;
 	rq->rq_async_args.pointer_arg[MSL_BMODECHG_CBARG_CSVC] = csvc;
 	rq->rq_interpret_reply = msl_rmc_bmodechg_cb;
+	if (flags & BMAPGETF_NONBLOCK)
+		bmap_op_start_type(b, BMAP_OPCNT_ASYNC);
 	rc = SL_NBRQSET_ADD(csvc, rq);
 	if (rc) {
-		if ((flags & BMAPGETF_NONBLOCK) == 0)
+		if (flags & BMAPGETF_NONBLOCK)
+			bmap_op_done_type(b, BMAP_OPCNT_ASYNC);
+		else
 			psc_compl_destroy(&compl);
 		PFL_GOTOERR(out, rc);
 	}
-	if ((flags & BMAPGETF_NONBLOCK) || rc) {
-		if (rc)
-			psc_compl_destroy(&compl);
-		else if (flags & BMAPGETF_NONBLOCK)
-			bmap_op_start_type(b, BMAP_OPCNT_ASYNC);
-		return (rc);
-	}
+	if (flags & BMAPGETF_NONBLOCK)
+		return (0);
 
 	psc_compl_wait(&compl);
 	psc_compl_destroy(&compl);
 
 	BMAP_LOCK(b);
+	/* XXX this is not race safe */
 	rc = bmap_2_bci(b)->bci_error;
 	BMAP_ULOCK(b);
 
@@ -234,8 +273,6 @@ msl_bmap_modeset(struct bmap *b, enum rw rw, int flags)
 	csvc = NULL;
 
 	if (rc == -SLERR_BMAP_DIOWAIT) {
-		// XXX async path is broken here
-
 		/* Retry for bmap to be DIO ready. */
 		DEBUG_BMAP(PLL_NOTICE, b,
 		    "SLERR_BMAP_DIOWAIT (try=%d)", nretries);
@@ -251,6 +288,7 @@ msl_bmap_modeset(struct bmap *b, enum rw rw, int flags)
 
  out:
 	pscrpc_req_finished(rq);
+	rq = NULL;
 	if (csvc) {
 		sl_csvc_decref(csvc);
 		csvc = NULL;
@@ -268,7 +306,6 @@ msl_rmc_bmlreassign_cb(struct pscrpc_request *rq,
 {
 	struct slashrpc_cservice *csvc = args->pointer_arg[MSL_CBARG_CSVC];
 	struct bmap *b = args->pointer_arg[MSL_CBARG_BMAP];
-	struct bmap_cli_info *bci = bmap_2_bci(b);
 	struct srm_reassignbmap_rep *mp;
 	int rc;
 
@@ -276,6 +313,7 @@ msl_rmc_bmlreassign_cb(struct pscrpc_request *rq,
 	psc_assert(b->bcm_flags & BMAPF_REASSIGNREQ);
 
 	SL_GET_RQ_STATUS(csvc, rq, mp, rc);
+	msl_bmap_stash_lease(b, &mp->sbd, rc, "reassign");
 	if (rc) {
 		/*
 		 * If the MDS replies with SLERR_ION_OFFLINE then don't
@@ -283,20 +321,9 @@ msl_rmc_bmlreassign_cb(struct pscrpc_request *rq,
 		 */
 		if (rc == -SLERR_ION_OFFLINE)
 			bmap_2_bci(b)->bci_nreassigns = 0;
-	} else {
-		msl_bmap_stash_lease(b, &mp->sbd);
-
-		PFL_GETTIMESPEC(&bmap_2_bci(b)->bci_etime);
-		timespecadd(&bmap_2_bci(b)->bci_etime,
-		    &msl_bmap_max_lease, &bmap_2_bci(b)->bci_etime);
 	}
 
 	b->bcm_flags &= ~BMAPF_REASSIGNREQ;
-
-	DEBUG_BMAP(rc ? PLL_ERROR : PLL_DIAG, b,
-	    "lease reassign: rc=%d nseq=%"PRId64" "
-	    "etime="PSCPRI_TIMESPEC, rc, bci->bci_sbd.sbd_seq,
-	    PFLPRI_PTIMESPEC_ARGS(&bci->bci_etime));
 
 	bmap_op_done_type(b, BMAP_OPCNT_REASSIGN);
 
@@ -311,38 +338,23 @@ msl_rmc_bmltryext_cb(struct pscrpc_request *rq,
 {
 	struct slashrpc_cservice *csvc = args->pointer_arg[MSL_CBARG_CSVC];
 	struct bmap *b = args->pointer_arg[MSL_CBARG_BMAP];
-	struct bmap_cli_info *bci = bmap_2_bci(b);
 	struct srm_leasebmapext_rep *mp;
-	struct timespec ts;
 	int rc;
 
 	BMAP_LOCK(b);
 	psc_assert(b->bcm_flags & BMAPF_LEASEEXTREQ);
 
-	PFL_GETTIMESPEC(&ts);
 	SL_GET_RQ_STATUS(csvc, rq, mp, rc);
-	if (!rc) {
-		msl_bmap_stash_lease(b, &mp->sbd);
-
-		timespecadd(&ts, &msl_bmap_max_lease, &bci->bci_etime);
-	} else {
-		/*
-		 * Unflushed data in this bmap is now invalid.  Move the
-		 * bmap out of the fid cache so that others don't
-		 * stumble across it while its active I/O's are failed.
-		 */
-		psc_assert(!(b->bcm_flags & BMAPF_LEASEFAILED));
-		bci->bci_etime = ts;
-		bci->bci_error = rc;
-		b->bcm_flags |= BMAPF_LEASEFAILED;
-	}
+	msl_bmap_stash_lease(b, &mp->sbd, rc, "extend");
+	/*
+	 * Unflushed data in this bmap is now invalid.
+	 *
+	 * XXX Move the bmap out of the fid cache so that others
+	 * don't stumble across it while its active I/O's are
+	 * failed.
+	 */
 
 	b->bcm_flags &= ~BMAPF_LEASEEXTREQ;
-
-	DEBUG_BMAP(rc ? PLL_ERROR : PLL_DIAG, b,
-	    "lease extension: rc=%d nseq=%"PRId64" "
-	    "etime="PSCPRI_TIMESPEC, rc, bci->bci_sbd.sbd_seq,
-	    PFLPRI_PTIMESPEC_ARGS(&bci->bci_etime));
 
 	bmap_op_done_type(b, BMAP_OPCNT_LEASEEXT);
 
@@ -416,7 +428,7 @@ msl_bmap_lease_tryreassign(struct bmap *b)
 	if (rc)
 		goto out;
 
-	memcpy(&mq->sbd, &bci->bci_sbd, sizeof(struct srt_bmapdesc));
+	mq->sbd = bci->bci_sbd;
 	memcpy(&mq->prev_sliods, &bci->bci_prev_sliods,
 	    sizeof(sl_ios_id_t) * (bci->bci_nreassigns + 1));
 	mq->nreassigns = bci->bci_nreassigns;
@@ -463,9 +475,9 @@ msl_bmap_lease_tryext(struct bmap *b, int blockable)
 	struct pscrpc_request *rq = NULL;
 	struct srm_leasebmapext_req *mq;
 	struct srm_leasebmapext_rep *mp;
+	struct srt_bmapdesc *sbd;
 	struct timespec ts;
 	int secs, rc;
-	struct srt_bmapdesc *sbd;
 
 	BMAP_LOCK_ENSURE(b);
 	if (b->bcm_flags & BMAPF_TOFREE) {
@@ -523,7 +535,7 @@ msl_bmap_lease_tryext(struct bmap *b, int blockable)
 	if (rc)
 		goto out;
 
-	memcpy(&mq->sbd, sbd, sizeof(struct srt_bmapdesc));
+	mq->sbd = *sbd;
 
 	rq->rq_async_args.pointer_arg[MSL_CBARG_BMAP] = b;
 	rq->rq_async_args.pointer_arg[MSL_CBARG_CSVC] = csvc;
@@ -622,39 +634,35 @@ msl_rmc_bmlget_cb(struct pscrpc_request *rq,
 	int rc;
 
 	SL_GET_RQ_STATUS(csvc, rq, mp, rc);
-
-	if (rc) {
-		BMAP_LOCK(b);
-		bci->bci_error = rc;
-		b->bcm_flags |= BMAPF_LEASEFAILED;
-		BMAP_ULOCK(b);
-	} else {
+	if (!rc) {
 		f = b->bcm_fcmh;
-
 		FCMH_LOCK(f);
 		msl_fcmh_stash_inode(f, &mp->ino);
 		FCMH_ULOCK(f);
-
-		BMAP_LOCK(b);
-		bci->bci_error = 0;
+	}
+	BMAP_LOCK(b);
+	msl_bmap_stash_lease(b, &mp->sbd, rc, "get");
+	if (!rc) {
 		memcpy(bci->bci_repls, mp->repls, sizeof(mp->repls));
-		msl_bmap_reap_init(b, &mp->sbd);
+		msl_bmap_reap_init(b);
 	}
 
-	if (mp)
-		DEBUG_BMAP(rc ? PLL_ERROR : PLL_DIAG, b,
-		    "rc=%d repls=%d ios=%#x seq=%"PRId64,
-		    rc, mp->ino.nrepls, mp->sbd.sbd_ios,
-		    mp->sbd.sbd_seq);
-	else
-		DEBUG_BMAP(rc ? PLL_ERROR : PLL_DIAG, b,
-		    "rc=%d mp=NULL", rc);
+	if (compl) {
+		BMAP_ULOCK(b);
 
-	if (compl)
+		/* synchronous */
 		psc_compl_ready(compl, 1);
-	else
+	} else {
+		BMAP_LOCK_ENSURE(b);
+
+		/* asynchronous */
+		b->bcm_flags &= ~BMAPF_LOADING;
+		if (!rc)
+			b->bcm_flags |= BMAPF_LOADED;
+
 		/* will do bmap_wake_locked() for anyone waiting for us */
 		bmap_op_done_type(b, BMAP_OPCNT_ASYNC);
+	}
 
 	sl_csvc_decref(csvc);
 	return (rc);
@@ -669,7 +677,7 @@ msl_rmc_bmlget_cb(struct pscrpc_request *rq,
  * @flags: access flags (BMAPGETF_*).
  */
 int
-msl_bmap_retrieve(struct bmap *b, enum rw rw, int flags)
+msl_bmap_retrieve(struct bmap *b, int flags)
 {
 	struct slashrpc_cservice *csvc = NULL;
 	struct pscrpc_request *rq = NULL;
@@ -689,9 +697,6 @@ msl_bmap_retrieve(struct bmap *b, enum rw rw, int flags)
 		pfr = mft->mft_pfr;
 	}
 
-	psc_assert(b->bcm_flags & BMAPF_INIT);
-	psc_assert(b->bcm_fcmh);
-
 	f = b->bcm_fcmh;
 	fci = fcmh_2_fci(f);
 
@@ -707,13 +712,13 @@ msl_bmap_retrieve(struct bmap *b, enum rw rw, int flags)
 	mq->fg = f->fcmh_fg;
 	mq->prefios[0] = msl_pref_ios;
 	mq->bmapno = b->bcm_bmapno;
-	mq->rw = rw;
+	mq->rw = b->bcm_flags & BMAPF_RD ? SL_READ : SL_WRITE;
 	mq->flags |= SRM_LEASEBMAPF_GETINODE;
 	if (flags & BMAPGETF_NODIO)
 		mq->flags |= SRM_LEASEBMAPF_NODIO;
 
-	DEBUG_FCMH(PLL_DIAG, f, "retrieving bmap (bmapno=%u) (rw=%s)",
-	    b->bcm_bmapno, rw == SL_READ ? "read" : "write");
+	DEBUG_FCMH(PLL_DIAG, f, "retrieving bmap (bmapno=%u)", b->bcm_bmapno);
+	DEBUG_BMAP(PLL_DIAG, b, "retrieving bmap");
 
 	if ((flags & BMAPGETF_NONBLOCK) == 0) {
 		psc_compl_init(&compl);
@@ -724,24 +729,24 @@ msl_bmap_retrieve(struct bmap *b, enum rw rw, int flags)
 	rq->rq_async_args.pointer_arg[MSL_BMLGET_CBARG_BMAP] = b;
 	rq->rq_async_args.pointer_arg[MSL_BMLGET_CBARG_CSVC] = csvc;
 	rq->rq_interpret_reply = msl_rmc_bmlget_cb;
+	if (flags & BMAPGETF_NONBLOCK)
+		bmap_op_start_type(b, BMAP_OPCNT_ASYNC);
 	rc = SL_NBRQSET_ADD(csvc, rq);
 	if (rc) {
-		if ((flags & BMAPGETF_NONBLOCK) == 0)
+		if (flags & BMAPGETF_NONBLOCK)
+			bmap_op_done_type(b, BMAP_OPCNT_ASYNC);
+		else
 			psc_compl_destroy(&compl);
 		PFL_GOTOERR(out, rc);
 	}
-	if ((flags & BMAPGETF_NONBLOCK) || rc) {
-		if (rc)
-			psc_compl_destroy(&compl);
-		else if (flags & BMAPGETF_NONBLOCK)
-			bmap_op_start_type(b, BMAP_OPCNT_ASYNC);
-		return (rc);
-	}
+	if (flags & BMAPGETF_NONBLOCK)
+		return (0);
 
 	psc_compl_wait(&compl);
 	psc_compl_destroy(&compl);
 
 	BMAP_LOCK(b);
+	/* XXX this is not race safe */
 	rc = bmap_2_bci(b)->bci_error;
 	BMAP_ULOCK(b);
 
@@ -749,8 +754,6 @@ msl_bmap_retrieve(struct bmap *b, enum rw rw, int flags)
 	csvc = NULL;
 
 	if (rc == -SLERR_BMAP_DIOWAIT) {
-		// XXX async path is broken here
-
 		/* Retry for bmap to be DIO ready. */
 		DEBUG_BMAP(PLL_NOTICE, b,
 		    "SLERR_BMAP_DIOWAIT (try=%d)", nretries);
@@ -800,34 +803,16 @@ msl_bmap_cache_rls(struct bmap *b)
 }
 
 void
-msl_bmap_reap_init(struct bmap *b, const struct srt_bmapdesc *sbd)
+msl_bmap_reap_init(struct bmap *b)
 {
 	struct bmap_cli_info *bci = bmap_2_bci(b);
-
-	psc_assert(!pfl_memchk(sbd, 0, sizeof(*sbd)));
+	struct srt_bmapdesc *sbd = bmap_2_sbd(b);
 
 	BMAP_LOCK_ENSURE(b);
 
-	bci->bci_sbd = *sbd;
-	/*
-	 * Occasionally, the client would send a write request with seqno
-	 * of 0 and rejected by the IOS with -501. So let us assert here
-	 * until we find the root cause or can fail more gracefully.
-	 */
-	psc_assert(bci->bci_sbd.sbd_seq);
-	/*
-	 * Record the start time,
-	 *  XXX the directio status of the bmap needs to be returned by
-	 *	the MDS so we can set the proper expiration time.
-	 */
-	PFL_GETTIMESPEC(&bci->bci_etime);
-
-	timespecadd(&bci->bci_etime, &msl_bmap_max_lease,
-	    &bci->bci_etime);
-
 	/*
 	 * Take the reaper ref cnt early and place the bmap onto the
-	 * reap list
+	 * reap list.
 	 */
 	b->bcm_flags |= BMAPF_TIMEOQ;
 	if (sbd->sbd_flags & SRM_LEASEBMAPF_DIO)
@@ -848,15 +833,6 @@ msl_bmap_reap_init(struct bmap *b, const struct srt_bmapdesc *sbd)
 	}
 
 	bmap_op_start_type(b, BMAP_OPCNT_REAPER);
-
-	b->bcm_flags &= ~BMAPF_INIT;
-	bmap_wake_locked(b);
-	BMAP_ULOCK(b);
-
-	DEBUG_BMAP(PLL_DIAG, b,
-	    "reap init: nseq=%"PRId64" etime="PSCPRI_TIMESPEC,
-	    bci->bci_sbd.sbd_seq,
-	    PFLPRI_PTIMESPEC_ARGS(&bci->bci_etime));
 
 	/*
 	 * Add ourselves here otherwise zero length files will not be
@@ -1079,7 +1055,7 @@ msbreleasethr_main(struct psc_thread *thr)
  *	long as it is recent).
  */
 int
-msl_bmap_to_csvc(struct bmap *b, int exclusive,
+msl_bmap_to_csvc(struct bmap *b, int exclusive, struct sl_resm **pm,
     struct slashrpc_cservice **csvcp)
 {
 	int has_residency, i, j, locked, rc;
@@ -1088,6 +1064,8 @@ msl_bmap_to_csvc(struct bmap *b, int exclusive,
 	struct sl_resm *m;
 	void *p;
 
+	if (pm)
+		*pm = NULL;
 	*csvcp = NULL;
 
 	psc_assert(atomic_read(&b->bcm_opcnt) > 0);
@@ -1102,8 +1080,11 @@ msl_bmap_to_csvc(struct bmap *b, int exclusive,
 		psc_assert(m->resm_res->res_id == bmap_2_ios(b));
 		BMAP_URLOCK(b, locked);
 		*csvcp = slc_geticsvc(m);
-		if (*csvcp)
+		if (*csvcp) {
+			if (pm)
+				*pm = m;
 			return (0);
+		}
 		rc = m->resm_csvc->csvc_lasterrno;
 		if (rc)
 			return (-abs(rc));
@@ -1142,7 +1123,7 @@ msl_bmap_to_csvc(struct bmap *b, int exclusive,
 		for (i = 0; i < fci->fci_inode.nrepls; i++) {
 			rc = msl_try_get_replica_res(b,
 			    fci->fcif_idxmap[i], j ? has_residency : 1,
-			    csvcp);
+			    pm, csvcp);
 			switch (rc) {
 			case 0:
 				psc_multiwait_leavecritsect(mw);
