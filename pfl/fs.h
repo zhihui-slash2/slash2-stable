@@ -74,6 +74,7 @@ struct pscfs {
 	struct pfl_opstat	*pf_opst_read_reply;
 	struct pfl_opstat	*pf_opst_write_reply;
 	struct pfl_opstat	*pf_opst_write_err;
+	void			*pf_private;
 	const char		*pf_name;
 
 	void	(*pf_handle_access)(struct pscfs_req *, pscfs_inum_t, int);
@@ -112,10 +113,11 @@ struct pscfs {
 	NULL,								\
 	NULL,								\
 	NULL,								\
+	NULL,								\
 	NULL
 
 struct pscfs_clientctx {
-	pid_t	pfcc_pid;
+	pid_t		pfcc_pid;
 };
 
 void	pscfs_addarg(struct pscfs_args *, const char *);
@@ -188,6 +190,20 @@ int	pscfs_notify_inval_entry(struct pscfs_req *, pscfs_inum_t, const char *, siz
 #define PSCFS_SETATTRF_ALL		(~0)
 
 int pscfs_ctlparam(int, struct psc_ctlmsghdr *, struct psc_ctlmsg_param *, char **, int);
+
+#define PFLFS_MOD_POS_LAST		(-1)
+
+void	pflfs_module_add(int, struct pscfs *);
+struct pscfs *
+	pflfs_module_remove(int);
+
+void	pflfs_module_destroy(struct pscfs *);
+void	pflfs_module_init(struct pscfs *);
+
+void	pflfs_modules_rdpin(void);
+void	pflfs_modules_rdunpin(void);
+void	pflfs_modules_wrpin(void);
+void	pflfs_modules_wrunpin(void);
 
 extern struct psc_dynarray		pscfs_modules;
 

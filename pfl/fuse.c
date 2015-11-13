@@ -52,6 +52,7 @@
 #include "pfl/random.h"
 #include "pfl/sys.h"
 #include "pfl/waitq.h"
+#include "pfl/workthr.h"
 
 #ifdef __LP64__
 #  include "pfl/hashtbl.h"
@@ -496,20 +497,9 @@ pfl_fuse_atexit(void)
 int
 pscfs_main(int privsiz)
 {
-	struct pscfs *m;
 	int i;
 
-	psc_dynarray_add(&pscfs_modules, &pscfs_default_ops);
-	DYNARRAY_FOREACH(m, i, &pscfs_modules) {
-		m->pf_opst_read_err = pfl_opstat_initf(OPSTF_BASE10,
-		    "fs.%s.read.err", m->pf_name);
-		m->pf_opst_write_err = pfl_opstat_initf(OPSTF_BASE10,
-		    "fs.%s.write.err", m->pf_name);
-		m->pf_opst_read_reply =
-		    pfl_opstat_init("fs.%s.read.reply", m->pf_name);
-		m->pf_opst_write_reply =
-		    pfl_opstat_init("fs.%s.write.reply", m->pf_name);
-	}
+	pflfs_module_add(PFLFS_MOD_POS_LAST, &pscfs_default_ops);
 
 #ifndef __LP64__
 	struct pscfs_inumcol *pfic;
@@ -785,6 +775,7 @@ pscfs_inum_pscfs2fuse(pscfs_inum_t p_inum, double timeo)
 		int _mi, _prior_success = 0;				\
 		struct pscfs *_m;					\
 									\
+		pflfs_modules_rdpin();					\
 		DYNARRAY_FOREACH(_m, _mi, &pscfs_modules) {		\
 			if (_m->pf_handle_ ##op == NULL)		\
 				continue;				\
@@ -829,6 +820,8 @@ pfr_decref(struct pscfs_req *pfr, int rc)
 		return;
 	}
 	psc_pool_return(pscfs_req_pool, pfr);
+
+	pflfs_modules_rdunpin();
 }
 
 void
@@ -837,6 +830,7 @@ pscfs_fuse_handle_access(fuse_req_t req, fuse_ino_t inum, int mask)
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(access, pfr, INUM_FUSE2PSCFS(inum), mask);
 }
 
@@ -847,6 +841,7 @@ pscfs_fuse_handle_release(fuse_req_t req, __unusedx fuse_ino_t inum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(release, pfr, fi_getdata(fi));
 }
 
@@ -857,6 +852,7 @@ pscfs_fuse_handle_releasedir(fuse_req_t req, __unusedx fuse_ino_t inum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(releasedir, pfr, fi_getdata(fi));
 }
 
@@ -868,6 +864,7 @@ pscfs_fuse_handle_create(fuse_req_t req, fuse_ino_t pinum,
 
 	GETPFR(pfr, req);
 	pfr->pfr_fuse_fi = fi;
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(create, pfr, INUM_FUSE2PSCFS(pinum), name, fi->flags,
 	    mode);
 }
@@ -879,6 +876,7 @@ pscfs_fuse_handle_flush(fuse_req_t req, __unusedx fuse_ino_t inum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(flush, pfr, fi_getdata(fi));
 }
 
@@ -889,6 +887,7 @@ pscfs_fuse_handle_fsync(fuse_req_t req, __unusedx fuse_ino_t inum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(fsync, pfr, datasync, fi_getdata(fi));
 }
 
@@ -899,6 +898,7 @@ pscfs_fuse_handle_fsyncdir(fuse_req_t req, __unusedx fuse_ino_t inum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(fsyncdir, pfr, datasync, fi_getdata(fi));
 }
 
@@ -909,6 +909,7 @@ pscfs_fuse_handle_getattr(fuse_req_t req, fuse_ino_t inum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(getattr, pfr, INUM_FUSE2PSCFS(inum));
 }
 
@@ -919,6 +920,7 @@ pscfs_fuse_handle_link(fuse_req_t req, fuse_ino_t c_inum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(link, pfr, INUM_FUSE2PSCFS(c_inum),
 	    INUM_FUSE2PSCFS(p_inum), newname);
 }
@@ -930,6 +932,7 @@ pscfs_fuse_handle_lookup(fuse_req_t req, fuse_ino_t pinum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(lookup, pfr, INUM_FUSE2PSCFS(pinum), name);
 }
 
@@ -940,6 +943,7 @@ pscfs_fuse_handle_mkdir(fuse_req_t req, fuse_ino_t pinum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(mkdir, pfr, INUM_FUSE2PSCFS(pinum), name, mode);
 }
 
@@ -950,6 +954,7 @@ pscfs_fuse_handle_mknod(fuse_req_t req, fuse_ino_t pinum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(mknod, pfr, INUM_FUSE2PSCFS(pinum), name, mode, rdev);
 }
 
@@ -961,6 +966,7 @@ pscfs_fuse_handle_open(fuse_req_t req, fuse_ino_t inum,
 
 	GETPFR(pfr, req);
 	pfr->pfr_fuse_fi = fi;
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(open, pfr, INUM_FUSE2PSCFS(inum), fi->flags);
 }
 
@@ -972,6 +978,7 @@ pscfs_fuse_handle_opendir(fuse_req_t req, fuse_ino_t inum,
 
 	GETPFR(pfr, req);
 	pfr->pfr_fuse_fi = fi;
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(opendir, pfr, INUM_FUSE2PSCFS(inum), fi->flags);
 }
 
@@ -994,6 +1001,7 @@ pscfs_fuse_handle_readdir(fuse_req_t req, __unusedx fuse_ino_t inum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(readdir, pfr, size, off, fi_getdata(fi));
 }
 
@@ -1003,6 +1011,7 @@ pscfs_fuse_handle_readlink(fuse_req_t req, fuse_ino_t inum)
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(readlink, pfr, INUM_FUSE2PSCFS(inum));
 }
 
@@ -1013,6 +1022,7 @@ pscfs_fuse_handle_rename(fuse_req_t req, fuse_ino_t oldpinum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(rename, pfr, INUM_FUSE2PSCFS(oldpinum), oldname,
 	    INUM_FUSE2PSCFS(newpinum), newname);
 }
@@ -1024,6 +1034,7 @@ pscfs_fuse_handle_rmdir(fuse_req_t req, fuse_ino_t pinum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(rmdir, pfr, INUM_FUSE2PSCFS(pinum), name);
 }
 
@@ -1066,6 +1077,7 @@ pscfs_fuse_handle_statfs(fuse_req_t req, fuse_ino_t inum)
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(statfs, pfr, INUM_FUSE2PSCFS(inum));
 }
 
@@ -1076,6 +1088,7 @@ pscfs_fuse_handle_symlink(fuse_req_t req, const char *buf,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(symlink, pfr, buf, INUM_FUSE2PSCFS(pinum), name);
 }
 
@@ -1095,6 +1108,7 @@ pscfs_fuse_handle_unlink(fuse_req_t req, fuse_ino_t pinum,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(unlink, pfr, INUM_FUSE2PSCFS(pinum), name);
 }
 
@@ -1117,6 +1131,7 @@ pscfs_fuse_handle_listxattr(fuse_req_t req, fuse_ino_t ino,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(listxattr, pfr, size, INUM_FUSE2PSCFS(ino));
 }
 
@@ -1135,6 +1150,7 @@ pscfs_fuse_handle_setxattr(fuse_req_t req, fuse_ino_t ino,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(setxattr, pfr, name, value, size, INUM_FUSE2PSCFS(ino));
 }
 
@@ -1151,6 +1167,7 @@ pscfs_fuse_handle_getxattr(fuse_req_t req, fuse_ino_t ino,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(getxattr, pfr, name, size, INUM_FUSE2PSCFS(ino));
 }
 
@@ -1161,6 +1178,7 @@ pscfs_fuse_handle_removexattr(fuse_req_t req, fuse_ino_t ino,
 	struct pscfs_req *pfr;
 
 	GETPFR(pfr, req);
+	fuse_req_interrupt_func(req, pscfs_fuse_interrupt, pfr);
 	FSOP(removexattr, pfr, name, INUM_FUSE2PSCFS(ino));
 }
 
@@ -1845,6 +1863,8 @@ void
 pscfsop_destroy(struct pscfs_req *pfr)
 {
 	(void)pfr;
+	pscthr_killall();
+	pfl_wkthr_killall();
 }
 
 void
